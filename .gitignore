@@ -1,28 +1,28 @@
-  # Secrets
-  .env
-  .env.*
-  *.key
-  *.pem
+# Secrets
+.env
+.env.*
+*.key
+*.pem
 
-  # Python
-  __pycache__/
-  *.pyc
-  .venv/
-  venv/
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
 
-  # Docker / runtime
-  **/data/
-  **/logs/
-  *.log
+# Docker / runtime
+**/data/
+**/logs/
+*.log
 
-  # OS
-  Thumbs.db
-  .DS_Store
+# OS
+Thumbs.db
+.DS_Store
 
-  # Editors
-  .vscode/
-  .idea/
+# Editors
+.vscode/
+.idea/
 
-  # Local notes
-  notes/
-  scratch/
+# Local notes
+notes/
+scratch/
