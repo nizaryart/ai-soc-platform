@@ -1,0 +1,28 @@
+  # Secrets
+  .env
+  .env.*
+  *.key
+  *.pem
+
+  # Python
+  __pycache__/
+  *.pyc
+  .venv/
+  venv/
+
+  # Docker / runtime
+  **/data/
+  **/logs/
+  *.log
+
+  # OS
+  Thumbs.db
+  .DS_Store
+
+  # Editors
+  .vscode/
+  .idea/
+
+  # Local notes
+  notes/
+  scratch/

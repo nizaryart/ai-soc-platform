@@ -1,0 +1,14 @@
+This product includes software originally developed by OnyxLab
+(https://github.com/zhadyz/AI_SOC), licensed under the Apache License 2.0.
+
+Modifications and additions in this distribution (2026):
+ - 4-node distributed deployment topology (3 Windows hosts + 1 Linux NIDS sensor)
+ - Cross-host firewall automation
+ - Sysmon endpoint telemetry across all Windows hosts (SwiftOnSecurity config)
+ - Linux NIDS sensor (Suricata + Zeek) running in WSL2 Ubuntu
+ - Custom Wazuh detection rules
+ - Custom Cortex analyzer
+ - Custom Shuffle SOAR playbooks
+ - Custom Grafana dashboards
+ - Atomic Red Team validation suite
+ - Benchmark report on CPU-only hardware
