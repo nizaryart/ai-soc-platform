@@ -64,8 +64,14 @@ foreach ($tool in @("git", "docker", "python")) {
 }
 
 # Docker daemon reachable?
-try { $null = docker info 2>&1; Write-Ok "Docker daemon is responding" }
-catch { Fail "Docker daemon not responding. Is Docker Desktop running?" }
+# Use docker version which only fails on real daemon issues; stderr is silenced
+# so PowerShell doesn't treat docker info's harmless WARNING lines as errors.
+$null = docker version --format '{{.Server.Version}}' 2>$null
+if ($LASTEXITCODE -eq 0) {
+    Write-Ok "Docker daemon is responding"
+} else {
+    Fail "Docker daemon not responding. Is Docker Desktop running and fully started (green whale icon)?"
+}
 
 # Ollama listening on 0.0.0.0?
 $ollamaBind = netstat -ano | Select-String ":11434.*LISTENING" | Select-String "0\.0\.0\.0"
