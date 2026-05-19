@@ -131,6 +131,11 @@ Copy-Item -Recurse "$UPSTREAM\models" $dst -Force
 $count = (Get-ChildItem $dst -File -Filter *.pkl).Count
 Write-Ok "Copied models/ ($count .pkl files)"
 
+# ml_training/ - the ml-inference service builds from this folder
+$dst = Join-Path $PORTFOLIO "ml_training"
+Copy-Item -Recurse "$UPSTREAM\ml_training" $dst -Force
+Write-Ok "Copied ml_training/ (ml-inference build context)"
+
 # ----------------------------------------------------------------------------
 # Step 4 - Place .pkl models inside ml-inference/models/
 # ----------------------------------------------------------------------------
