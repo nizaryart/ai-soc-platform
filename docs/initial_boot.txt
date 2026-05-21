@@ -1,0 +1,277 @@
+================================================================================
+   SOAR SERVICES - FIRST-TIME LOGIN GUIDE
+================================================================================
+
+Phase 2 services that need first-run setup before you can use them.
+Run through each ONCE, in order. After this, you log in normally.
+
+Replace <M1_IP> with your Machine 1 LAN IP everywhere (currently 192.168.100.252,
+but it may change with DHCP lease renewals).
+
+
+================================================================================
+   1. THEHIVE 5  -  Case Management
+================================================================================
+
+URL:    http://<M1_IP>:9010
+
+FIRST-RUN FLOW
+--------------
+
+  Step 1   Login as platform super-admin (built-in account)
+
+           Username:  admin@thehive.local
+           Password:  secret
+
+           You will be FORCED to change this password immediately
+           after first login. Pick something strong; save it in
+           your password manager. You will rarely use this account
+           again - it is only for creating organizations.
+
+  Step 2   Create an Organization
+
+           Top-right menu -> Organizations -> New Organization
+
+           Name:        AI-SOC
+           Description: Distributed AI-augmented SOC
+
+  Step 3   Create your day-to-day user inside the organization
+
+           Organizations -> AI-SOC -> Users -> Add User
+
+           Login:    your-name@aisoc.local         (this IS your login)
+           Name:     Your Full Name
+           Profile:  org-admin                     (gives you full power
+                                                    within the org)
+           Password: pick a strong one
+
+  Step 4   Log out of the super-admin account, log back in as your new user
+
+           From now on, this is the account you use.
+
+
+WHAT TO CREATE NEXT (after Cortex is set up in step 2 of this guide)
+--------------------------------------------------------------------
+
+  - An API key for your user (Profile -> API Keys -> Create)
+    Save this key. The AI services on M2 will use it to create
+    cases programmatically.
+
+  - The Cortex connection (Settings -> Cortex -> Add Server)
+    URL:     http://soar-cortex:9001
+    API key: (the Cortex API key from step 2 below)
+
+
+COMMON ISSUE
+------------
+
+  If the page says "404 Not Found" or "Service Unavailable", TheHive
+  is still starting up after Cassandra finishes. Wait 60-90 seconds
+  after first boot. Refresh.
+
+
+================================================================================
+   2. CORTEX 3  -  Observable Analyzers
+================================================================================
+
+URL:    http://<M1_IP>:9011
+
+FIRST-RUN FLOW
+--------------
+
+  Step 1   Initialize the database
+
+           A button labeled "Update Database" appears in the middle
+           of the page on first visit. Click it. Wait ~30 seconds
+           while Cortex creates its ES indices.
+
+  Step 2   Create the super-admin account
+
+           A form appears asking for:
+
+           Login:     admin
+           Name:      Cortex Admin
+           Password:  pick a strong one
+
+  Step 3   Log in as the super-admin you just created
+
+  Step 4   Create an Organization
+
+           Top-right menu -> Organizations -> Add Organization
+
+           Name:        AI-SOC
+
+  Step 5   Create your day-to-day user inside that organization
+
+           Organizations -> AI-SOC -> Users -> Add User
+
+           Login:    your-name
+           Name:     Your Full Name
+           Roles:    [x] read   [x] analyze   [x] orgAdmin
+           Password: pick a strong one
+
+  Step 6   Log out of super-admin. Log back in as your org user.
+
+  Step 7   Create an API key for this user
+
+           User icon (top right) -> API key -> Create
+
+           COPY THE KEY IMMEDIATELY. It is shown only once.
+           Save it in your password manager.
+
+           This is the key that TheHive uses to call Cortex
+           (configured in TheHive's settings, see TheHive section above).
+
+
+WHAT TO CONFIGURE NEXT (Block 2 of Day 2)
+-----------------------------------------
+
+  Enable analyzers using your free API keys:
+  - VirusTotal_GetReport       (virustotal.com)
+  - AbuseIPDB                  (abuseipdb.com)
+  - OTX_Pulses                 (otx.alienvault.com)
+  - MaxMind_GeoIP_3_0          (maxmind.com)
+
+  Walked through together when you say "first-run done".
+
+
+COMMON ISSUE
+------------
+
+  After clicking "Update Database", if the page hangs or returns 500,
+  Cortex is still waiting for ElasticSearch to be ready. Refresh after
+  30 more seconds. The background ES connection errors in the container
+  logs are cosmetic - the UI works.
+
+
+================================================================================
+   3. SHUFFLE  -  Workflow Automation
+================================================================================
+
+URL:    http://<M1_IP>:3001
+
+FIRST-RUN FLOW
+--------------
+
+  Step 1   You will see a sign-up form (NOT a login form) on first visit
+
+           Username:  your-name              (this becomes your login)
+           Password:  pick a strong one
+           Confirm:   same password
+
+           Click "Register". The account created here is automatically
+           the platform admin.
+
+  Step 2   You are logged in. You will see the empty Workflows page.
+
+  Step 3   (Optional) Create an additional user for day-to-day work
+
+           Admin -> Users -> New User
+           This is only needed if multiple people will use Shuffle.
+
+
+WHAT TO CONFIGURE NEXT (Block 3 of Day 2)
+-----------------------------------------
+
+  Build two playbooks together:
+  1. IOC Enrichment        - auto-runs Cortex analyzers on TheHive
+                             observables when they appear
+  2. High-Risk Auto-Response - blocks IP + sends Slack notification
+                               when a case risk score >= 80
+
+  Walked through together when you say "first-run done".
+
+
+COMMON ISSUE
+------------
+
+  If the sign-up form refuses to submit ("backend not reachable"):
+  - The shuffle-backend container might be unhealthy still
+  - Wait 60 seconds after first boot, refresh
+  - If still failing, check: docker logs soar-shuffle-backend --tail 20
+
+
+================================================================================
+   4. MINIO  -  Object Storage (for Cortex reports)
+================================================================================
+
+URL:    http://<M1_IP>:9005
+
+FIRST-RUN FLOW
+--------------
+
+  No first-run wizard. Credentials are pre-configured from .env.
+
+  Login:    minioadmin
+  Password: MinIO@SOAR@2026Lab
+
+  You should NOT need to do anything in this UI. It exists so you
+  can inspect Cortex analyzer report blobs if curious. Cortex creates
+  a bucket called "cortex-jobs" automatically on first analyzer run.
+
+
+================================================================================
+   ORDER OF OPERATIONS - CRITICAL
+================================================================================
+
+Do these in this exact order, because each one depends on values
+generated by the previous:
+
+  1. TheHive       -> create super-admin, org, user
+  2. Cortex        -> create super-admin, org, user, API KEY
+  3. Back to TheHive -> configure Cortex connection using Cortex API key
+                        (Settings -> Cortex -> Add Server)
+  4. TheHive       -> generate YOUR user's API key (for AI on M2)
+  5. Shuffle       -> register admin account
+  6. MinIO         -> just verify login works
+
+
+================================================================================
+   ANALYST CREDENTIALS SHEET (fill in as you set up)
+================================================================================
+
+Copy this block into your password manager:
+
+  TheHive
+    URL:                http://<M1_IP>:9010
+    Super-admin login:  admin@thehive.local
+    Super-admin pass:   ____________________
+    Org user login:     ____________________
+    Org user pass:      ____________________
+    API key:            ____________________
+
+  Cortex
+    URL:                http://<M1_IP>:9011
+    Super-admin login:  admin
+    Super-admin pass:   ____________________
+    Org user login:     ____________________
+    Org user pass:      ____________________
+    API key:            ____________________
+
+  Shuffle
+    URL:                http://<M1_IP>:3001
+    Login:              ____________________
+    Pass:               ____________________
+
+  MinIO
+    URL:                http://<M1_IP>:9005
+    Login:              minioadmin
+    Pass:               MinIO@SOAR@2026Lab     (in .env)
+
+
+================================================================================
+   QUICK SANITY CHECKS
+================================================================================
+
+After completing first-run on all four, verify from M1:
+
+  curl -s -o /dev/null -w "thehive:%{http_code}\n"  http://localhost:9010
+  curl -s -o /dev/null -w "cortex:%{http_code}\n"   http://localhost:9011
+  curl -s -o /dev/null -w "shuffle:%{http_code}\n"  http://localhost:3001
+  curl -s -o /dev/null -w "minio:%{http_code}\n"    http://localhost:9005
+
+  Expected: all should return 200, 302, or 303 (login redirects).
+  Anything in the 5xx range means the service is broken.
+
+When all four show 2xx/3xx and you have written down your credentials,
+say "first-run done" and we go to Block 2 (Cortex analyzer configuration).

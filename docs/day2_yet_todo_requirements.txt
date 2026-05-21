@@ -1,0 +1,272 @@
+================================================================================
+   DAY 2 — DEFERRED ITEMS / TODO BEFORE COMPLETION
+================================================================================
+
+Snapshot taken 2026-05-19, after Cortex analyzers were enabled and before
+Day 3 (M2 / AI services) begins.
+
+Everything listed here was intentionally skipped or deferred to keep Day 2
+moving. Each item should be addressed before the project is shown publicly
+(some are blockers for the end-to-end demo, others are polish).
+
+Items are grouped by priority. Tackle CRITICAL first when you return to Day 2,
+then HIGH, then MEDIUM, then LOW.
+
+
+================================================================================
+   CRITICAL — SECURITY FOLLOW-UPS
+================================================================================
+
+[ ] 1. Wazuh admin password rotation
+      Current state:  admin / admin   (Wazuh Indexer and Dashboard)
+      Why deferred:   Requires generating admin client cert + running
+                      securityadmin.sh. Documented procedure in
+                      docs/operations.md section 1.
+      How long:       ~30 min
+      Blocker for:    Going public on GitHub or sharing demo recordings
+
+
+[ ] 2. Rotate Wazuh API_PASSWORD that was exposed in git history
+      Current value:  Wazuh.API.Pass.2026  (was committed once, now scrubbed
+                      via git-filter-repo, but anyone with the SHA could have
+                      cached it during the brief window it was public)
+      Action:         Generate a new password, update .env, recreate the
+                      Wazuh stack with --force-recreate
+      How long:       5 min
+
+
+[ ] 3. .gitattributes / line ending follow-up
+      Issue:          Already added .gitattributes that forces LF on .conf
+                      .yml .yaml .xml .json .cnf — but old files committed
+                      pre-fix may still have CRLF in their stored blobs.
+      Action:         Run `git add --renormalize .` then commit
+      How long:       2 min
+
+
+================================================================================
+   HIGH — DAY 2 FUNCTIONAL COMPLETION
+================================================================================
+
+These are needed BEFORE the Day 2 end-to-end demo works. Block 3 (Shuffle
+playbooks) depends on most of them.
+
+
+[ ] 4. TheHive <-> Cortex integration (UI step)
+      Where:    TheHive UI -> Admin -> Cortex servers -> Add Server
+                Name:    local
+                URL:     http://soar-cortex:9001
+                API key: (Cortex API key — generate first in Cortex UI under
+                         your user profile)
+      Why:      Required so TheHive cases can call Cortex analyzers on
+                their observables. Without this, "Run All Analyzers" in
+                TheHive does nothing.
+      How long: 5 min
+
+
+[ ] 5. TheHive webhook -> Shuffle (UI activation)
+      Where:    TheHive UI -> Admin -> Notifications -> Add Notification
+      Config:   Trigger:  AnyEvent  (or be specific: CaseCreated, ObservableCreated)
+                Notifier: webhook
+                Endpoint: shuffle  (matches the name in application.conf
+                          which is already declared at the file level)
+      Why:      Required for Shuffle playbooks to trigger on TheHive events.
+                Without this, Shuffle never receives anything.
+      How long: 3 min
+
+
+[ ] 6. TheHive custom field `risk_score`
+      Where:    TheHive UI -> Admin -> Custom Fields -> Add
+                Name:        risk_score
+                Type:        Integer
+                Description: AI-assigned risk score (0-100) from Phase 3
+                             alert-triage
+      Why:      The High-Risk Auto-Response workflow reads this. Without
+                it, Workflow 2 cannot decide when to fire.
+      How long: 2 min
+
+
+[ ] 7. Discord (or Slack) webhook URL
+      Where:    Create a Discord server (free, 30s) -> Server Settings ->
+                Integrations -> Webhooks -> New Webhook -> copy URL
+      Why:      Notification step in the High-Risk Auto-Response workflow.
+      How long: 5 min if you already have Discord; 10 if you need to sign up
+
+
+[ ] 8. Shuffle apps configured
+      Where:    Shuffle UI -> Apps tab -> search and configure:
+                  - TheHive 5     -> URL http://soar-thehive:9000 + API key
+                  - Cortex        -> URL http://soar-cortex:9001 + API key
+                  - HTTP (built-in, no config — used for Discord webhook POST)
+      Why:      Each workflow node that touches TheHive/Cortex uses these
+                saved app configs. Without them, you can't build the
+                workflows.
+      How long: 5 min
+
+
+[ ] 9. Build the 2 Shuffle workflows (Block 3 — full work, not just prep)
+      9a. IOC Enrichment
+            Trigger: TheHive observable created
+            Actions: for each observable, run matching Cortex analyzers,
+                     attach reports to the case
+            How long: ~1 hour to build + test
+      9b. High-Risk Auto-Response
+            Trigger: TheHive case where risk_score >= 80
+            Actions: generate Windows firewall block command, POST to
+                     Discord webhook, tag case as escalated
+            How long: ~1.5 hours to build + test
+      Total Block 3 work: ~2.5 hours
+
+
+[ ] 10. Re-enroll Wazuh agents on M2 and M3 with current M1 IP
+       Reason:     M1's IP changed from 192.168.100.124 (Day 1) to
+                   192.168.100.252 (Day 2 morning). Agents on M2/M3
+                   still point at the old IP and cannot reconnect.
+       Action:     On each of M2 and M3:
+                     Stop-Service WazuhSvc
+                     Edit C:\Program Files (x86)\ossec-agent\ossec.conf
+                       <address>OLD_IP</address> -> <address>NEW_IP</address>
+                     Start-Service WazuhSvc
+                   OR set up DHCP reservation on the router (preferred —
+                   solves the problem permanently for all 3 machines)
+       How long:   10 min (manual edit) or 5 min (DHCP reservation)
+       Blocker for: end-to-end demo with M2/M3 attack scenarios
+
+
+[ ] 11. First analyzer test run (cold start)
+       Why:      First time you click "Test" on an analyzer in Cortex UI,
+                 it pulls the cortexneurons/<name>:latest Docker image
+                 from Docker Hub (~50 MB per analyzer). Takes ~30s the
+                 first time, instant after that.
+       Action:   Cortex UI -> Analyzers -> AbuseIPDB_2_0 -> Test ->
+                 observable type "ip" value "1.2.3.4"
+                 Repeat for VirusTotal_GetReport_3_1 (test hash),
+                 OTXQuery_2_0 (test IP), MaxMind_GeoIP_4_0 (test 8.8.8.8)
+       How long: 5 min (4 analyzers x ~1 min including image pull)
+       Cleanup:  None — pulled images persist in Docker for future runs
+
+
+================================================================================
+   MEDIUM — CONFIGURATION POLISH
+================================================================================
+
+[ ] 12. Cosmetic "unhealthy" healthcheck labels
+       Affected: soar-thehive, soar-cortex, soar-shuffle-backend
+       Root cause: Healthchecks in upstream compose call auth-protected
+                   API paths and get 401, marking the container "unhealthy"
+                   even though the service works perfectly.
+       Action:   Edit phase2-soar-stack.yml — change each healthcheck to
+                 use an unauthenticated endpoint (e.g., GET / which returns
+                 303 redirect — treat 200-399 as healthy).
+       How long: 15 min
+       Blocker for: Nothing. Purely visual in `docker ps`.
+
+
+[ ] 13. Cleanup MaxMind extraction artifacts
+       Where:    config/cortex/maxmind/
+       Files:    GeoLite2-City.tar.gz       (31 MB, no longer needed)
+                 GeoLite2-City_20260519/    (extracted folder, 31 MB)
+       Action:   Remove-Item "C:\AI_Soc_P\ai-soc-portfolio\config\cortex\maxmind\GeoLite2-City.tar.gz"
+                 Remove-Item -Recurse "C:\AI_Soc_P\ai-soc-portfolio\config\cortex\maxmind\GeoLite2-City_20260519"
+       Keep:     GeoLite2-City.mmdb  (this is the active DB Cortex uses)
+
+
+[ ] 14. DHCP reservations on the router (solves item 10 permanently)
+       Where:    Router admin page (usually http://192.168.1.1 or .0.1)
+       Action:   Reserve current IPs for M1, M2, M3 MAC addresses
+       How long: 5 min
+       Permanent fix that prevents Wazuh / TheHive / Shuffle URL breakage
+       every time DHCP leases renew
+
+
+================================================================================
+   LOW — DOCUMENTATION + POLISH
+================================================================================
+
+[ ] 15. Commit all Day 2 work to git
+       What's uncommitted right now:
+         - docker-compose/phase2-soar-stack.yml  (shuffle-database removal,
+           frontend port fix, frontend network fix, OS 1.3.20 downgrade,
+           Cortex docker.sock mount, MaxMind volume)
+         - config/thehive/application.conf  (session/basic/key auth providers)
+         - config/cortex/application.conf  (db block removal, search block
+           added, analyzer.urls fix)
+         - config/cortex/maxmind/GeoLite2-City.mmdb  (the active DB)
+         - docs/phase2_explanation.md   (Phase 2 deep-dive doc)
+         - docs/initial_boot.txt        (first-run guide)
+         - docs/day2_yet_todo_requirements.txt   (this file)
+       Suggested commit:
+         cd C:\AI_Soc_P\ai-soc-portfolio
+         git add docker-compose/phase2-soar-stack.yml \
+                 config/thehive/application.conf \
+                 config/cortex/application.conf \
+                 config/cortex/maxmind/GeoLite2-City.mmdb \
+                 docs/
+         git commit -m "Day 2: full SOAR stack operational with 4 Cortex analyzers enabled, plus docs"
+         git push
+
+
+[ ] 16. Add credentials sheet entries for the new accounts created today
+       New accounts (save to password manager):
+         Cortex super-admin:
+           login:    nizaryart2003@gmail.com
+           password: 2003@@@YYart
+           role:     superadmin
+         Cortex org-admin bot (created by AI for analyzer config):
+           login:    analyzer-bot@aisoc.local
+           password: AnalyzerBot@2026Cortex
+           role:     orgadmin in AI-SOC org
+         TheHive user:
+           login:    (set during first-run, write down)
+           password: (set during first-run, write down)
+         Shuffle user:
+           login:    nizaryart2003@gmail.com
+           password: (set during first-run; recoverable via OpenSearch user index)
+           apikey:   b283ce63-9407-484f-8abb-c78f7d7bbe84
+
+
+[ ] 17. Update docs/operations.md with Day 2 lessons learned
+       Add notes about:
+         - TheHive auth.providers needing `session` for web UI cookies
+         - Cortex 3 + OpenSearch 2.x incompatibility (`include_type_name`)
+         - Shuffle 1.4+ uses OpenSearch directly (no shuffle-database)
+         - Shuffle frontend nginx listens on 80 not 3000
+         - Cortex 3 needs docker.sock mounted for analyzer execution
+         - All 4 OnyxLab upstream compose bugs we fixed
+
+
+================================================================================
+   ALREADY DOCUMENTED ELSEWHERE
+================================================================================
+
+These are not in this file because they live in dedicated docs:
+
+  - Wazuh password rotation procedure -> docs/operations.md (TODO #1)
+  - Wazuh template manual load        -> docs/operations.md (TODO #2)
+  - CRLF / LF line endings fix        -> docs/operations.md (TODO #3)
+  - Phase 2 architecture explanation  -> docs/phase2_explanation.md
+  - First-run wizard walkthroughs     -> docs/initial_boot.txt
+
+
+================================================================================
+   PRIORITY ORDER WHEN YOU COME BACK TO CLOSE OUT DAY 2
+================================================================================
+
+Recommended sequence — finishes everything in ~6 hours of focused work:
+
+  Sprint A (~30 min): Items 4, 5, 6, 8     [TheHive/Cortex/Shuffle integration]
+  Sprint B (~5 min):  Item 7               [Discord webhook]
+  Sprint C (~10 min): Item 10              [Wazuh agent re-enrollment OR DHCP reservation]
+  Sprint D (~2.5 hr): Item 9               [Build the 2 Shuffle workflows]
+  Sprint E (~5 min):  Item 11              [Cold-start analyzer tests]
+  Sprint F (~30 min): Items 1, 2, 3        [Security follow-ups before public]
+  Sprint G (~30 min): Items 15, 16, 17     [Commit + credentials + docs polish]
+  Sprint H (~20 min): Items 12, 13, 14     [Optional polish if time permits]
+
+After Sprint A-E, Day 2 is FUNCTIONALLY DONE — the end-to-end demo works.
+After Sprint F-G, Day 2 is PROJECT-READY — safe to publish.
+After Sprint H, Day 2 is POLISHED — production-quality.
+
+
+================================================================================
+   END OF FILE
+================================================================================
