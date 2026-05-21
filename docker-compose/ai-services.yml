@@ -61,6 +61,10 @@ services:
       - TRIAGE_ML_API_URL=http://ml-inference:8000
       - TRIAGE_RAG_SERVICE_URL=http://rag-service:8000
       - TRIAGE_LLM_TIMEOUT=${TRIAGE_LLM_TIMEOUT:-300}
+      # TheHive integration - original addition (upstream OnyxLab declared the
+      # config but never implemented the code). See services/alert-triage/thehive_client.py
+      - TRIAGE_THEHIVE_URL=${THEHIVE_URL}
+      - TRIAGE_THEHIVE_API_KEY=${THEHIVE_API_KEY}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

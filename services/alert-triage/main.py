@@ -22,6 +22,7 @@ from config import settings
 from models import SecurityAlert, TriageResponse, HealthResponse
 from llm_client import OllamaClient
 from worker_pool import WorkerPool
+from thehive_client import TheHiveClient
 
 # Configure logging
 logging.basicConfig(
@@ -45,9 +46,10 @@ ANALYSIS_CONFIDENCE = Histogram(
     'LLM confidence scores'
 )
 
-# Global LLM client and worker pool
+# Global LLM client, worker pool, and TheHive client
 llm_client: OllamaClient = None
 worker_pool: WorkerPool = None
+thehive_client: TheHiveClient = None
 
 
 @asynccontextmanager
@@ -57,7 +59,7 @@ async def lifespan(app: FastAPI):
 
     Initializes Ollama client and validates connectivity.
     """
-    global llm_client
+    global llm_client, thehive_client
 
     logger.info(f"Starting {settings.service_name} v{settings.service_version}")
     logger.info(f"Ollama host: {settings.ollama_host}")
@@ -65,6 +67,13 @@ async def lifespan(app: FastAPI):
 
     # Initialize LLM client
     llm_client = OllamaClient()
+
+    # Initialize TheHive client (used fire-and-forget after analysis)
+    thehive_client = TheHiveClient()
+    if thehive_client.configured:
+        logger.info(f"TheHive integration enabled: {settings.thehive_url}")
+    else:
+        logger.info("TheHive integration disabled (no url/api_key set)")
 
     # Check Ollama connectivity
     if not await llm_client.check_health():
@@ -189,6 +198,10 @@ async def analyze_alert(alert: SecurityAlert):
         # Persist alert + result to feedback service (fire-and-forget)
         if settings.feedback_enabled:
             asyncio.create_task(_persist_alert(alert, result))
+
+        # Create TheHive case (fire-and-forget; never blocks the response)
+        if thehive_client and thehive_client.configured:
+            asyncio.create_task(thehive_client.create_case(alert, result))
 
         return result
 
