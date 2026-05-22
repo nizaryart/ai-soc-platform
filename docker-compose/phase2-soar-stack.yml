@@ -248,6 +248,11 @@ services:
     volumes:
       - shuffle-apps:/shuffle-apps
       - shuffle-files:/shuffle-files
+      # Docker socket - required so shuffle-backend can BUILD custom app images
+      # (e.g. when importing TheHive OpenAPI spec, Shuffle builds a Docker image
+      # for the app). Without this mount, app uploads fail with
+      # "Cannot connect to the Docker daemon at unix:///var/run/docker.sock".
+      - /var/run/docker.sock:/var/run/docker.sock
 
     networks:
       - soar-backend
