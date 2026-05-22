@@ -1,0 +1,258 @@
+================================================================================
+   DAY 3 - REMAINING WORK (parts A and B)
+================================================================================
+
+Snapshot taken 2026-05-21, after the AI -> TheHive integration was verified
+working end-to-end (TheHive case ~4128 successfully created from a synthetic
+alert with full LLM analysis attached).
+
+Day 3 is FUNCTIONALLY complete - the killer differentiator (AI-enriched
+alerts auto-creating TheHive cases) works. Two items deferred to come back
+to before the demo/recording phase.
+
+
+================================================================================
+   STATUS - WHAT WORKS RIGHT NOW
+================================================================================
+
+End-to-end happy path verified:
+
+  Synthetic alert (curl POST :8002/webhook on M2)
+    -> wazuh-integration receives, validates
+    -> alert-triage orchestrates:
+       - ML inference (RF/XGB/DT ensemble) returns prediction
+       - RAG service retrieves MITRE context from ChromaDB
+       - Ollama (Llama 3.2 3B q4 on CPU) generates structured analysis
+    -> alert-triage's TheHive client (our original contribution) creates a
+       TheHive case with:
+       - Title prefixed by severity
+       - Description = AI summary + detailed analysis + impact
+       - Tags = MITRE techniques + category + TP/FP verdict
+       - Tasks = AI recommendations (priority-prefixed)
+       - Observables = source IP, user, hostnames, extracted IOCs
+    -> TheHive case visible at http://192.168.100.124:9010/cases/~XXXX
+
+Latency: ~60-90s per alert (LLM dominated)
+Hardware: CPU-only inference on M2 (16GB, no GPU)
+
+Verified TheHive case from latest smoke test:
+  http://192.168.100.124:9010/cases/~4128/details
+
+
+================================================================================
+   PART A - WIRE REAL WAZUH WEBHOOK -> AI ON M2
+================================================================================
+
+GOAL
+----
+
+Replace the synthetic curl POST with a REAL Wazuh integration:
+
+  Real attack on M2 endpoint
+    -> Wazuh agent on M2 ships event to Wazuh Manager on M1
+    -> Wazuh Manager applies its rules, raises alert (level >= 7)
+    -> Wazuh Manager fires webhook to M2 wazuh-integration:8002
+    -> Same AI pipeline as today
+    -> TheHive case appears
+
+This is the resume/demo-defining flow. Real attack -> real detection ->
+real AI triage -> real case creation. No synthetic data anywhere.
+
+
+WHY DEFERRED
+------------
+
+Synthetic POST works for proving the AI pipeline. Wiring the webhook is
+purely a Wazuh config edit + test. Not technically risky, just paperwork.
+
+
+WHAT TO DO
+----------
+
+1. Edit Wazuh Manager's ossec.conf on M1:
+   - Add an <integration> block pointing at M2's wazuh-integration:8002
+   - Set min level to 7 so only real alerts fire (not noise)
+
+   Path inside container:
+     /var/ossec/etc/ossec.conf
+
+   Block to add inside <ossec_config>:
+
+     <integration>
+       <name>custom-webhook</name>
+       <hook_url>http://192.168.100.152:8002/webhook</hook_url>
+       <level>7</level>
+       <alert_format>json</alert_format>
+     </integration>
+
+   NOTE: Wazuh's "custom-webhook" integration name requires a small
+   Python helper script in /var/ossec/integrations/. The script just
+   forwards the alert JSON via HTTP POST. Wazuh has examples shipped
+   with the image (custom-slack.py etc.) - copy one of those and
+   adapt to POST to our URL with the right body shape.
+
+2. Restart Wazuh Manager so it picks up the new integration:
+
+   On M1:
+     docker compose -f docker-compose\phase1-siem-core-windows.yml restart wazuh-manager
+
+   Wait ~60s for healthy state.
+
+3. Trigger a real alert from M2 (or M3) - the Day 1 brute-force pattern:
+
+     1..6 | ForEach-Object {
+         net use \\127.0.0.1\IPC$ /user:fakeuser$_ "WrongPassword$_" 2>&1 | Out-Null
+         Start-Sleep -Milliseconds 500
+     }
+
+4. Watch the chain end-to-end (open three windows in parallel):
+
+   Window A - Wazuh dashboard (M1 browser):
+     https://192.168.100.124:443 -> Security events
+     - Should see the failed-logon alerts within 30s
+
+   Window B - M2 wazuh-integration logs:
+     docker compose -f docker-compose\ai-services.yml logs -f wazuh-integration
+
+   Window C - TheHive UI:
+     http://192.168.100.124:9010 -> Cases
+     - New case should appear ~90s after the attack (LLM time)
+
+
+VERIFICATION CRITERIA
+---------------------
+
+  [ ] Wazuh dashboard shows the failed-logon alerts
+  [ ] M2 wazuh-integration logs show "webhook_alert_received" with the
+      alert_id matching what Wazuh raised
+  [ ] alert-triage logs show "TheHive case <id> created" for that same alert
+  [ ] TheHive UI shows the new case with AI severity, summary, observables
+
+
+COMMON GOTCHAS
+--------------
+
+- The Wazuh integration script must be executable: chmod +x
+- IP of M2 must be reachable from inside the wazuh-manager container.
+  Test from inside the container:
+    docker exec wazuh-manager curl -s -o /dev/null -w "%{http_code}\n" http://192.168.100.152:8002/health
+  Should return 200. If not, M2 firewall or networking issue.
+- Wazuh's webhook payload shape is slightly different from our synthetic
+  JSON. Our wazuh-integration's pydantic model may need to be lenient
+  about extra fields - that should already be the case but worth
+  confirming on first real test.
+
+
+================================================================================
+   PART B - WHY mitre_techniques RETURNED EMPTY
+================================================================================
+
+GOAL
+----
+
+The TriageResponse field mitre_techniques was empty in our test alerts even
+though RAG was applied. Cases in TheHive should have rich MITRE tags like
+mitre:T1110.001 for proper SOC categorization. Right now they just have the
+category tag.
+
+
+CURRENT SYMPTOMS
+----------------
+
+  rag_enrichment_applied : True
+  mitre_techniques       : []   <-- expected something like [T1110.001]
+  mitre_context          : empty
+  kb_references          : empty
+  similar_incidents      : empty
+
+
+POSSIBLE ROOT CAUSES (in order of suspicion)
+--------------------------------------------
+
+1. RAG retrieves MITRE entries but they're not flowing into the LLM prompt
+   - Fix: check rag-service response and confirm alert-triage uses the
+     context_manager output to populate the LLM prompt
+
+2. LLM didn't include mitre_techniques in its structured output
+   - Common with smaller models (3B). The Llama 3.2 3B may be dropping
+     the field if the prompt template doesn't STRONGLY ask for it.
+   - Fix: check the prompt template in llm_client.py; emphasize that the
+     model MUST include mitre_techniques as a list of MITRE IDs.
+
+3. The synthetic payload doesn't have rule.mitre block, so RAG retrieval
+   has nothing structured to query against
+   - Real Wazuh alerts include a rule.mitre block. So this might
+     "just work" once we do Part A (real Wazuh webhook).
+
+
+INVESTIGATION STEPS
+-------------------
+
+1. Send a smoke test, then inspect:
+
+     docker logs alert-triage --tail 40 | findstr -i "rag\|mitre\|context"
+
+   Look for: "RAG retrieved N MITRE techniques: [...]"
+
+2. If RAG retrieves but LLM doesn't include them in output, inspect the
+   prompt template:
+
+     cat services/alert-triage/llm_client.py | findstr -A 30 "PROMPT\|prompt"
+
+   Confirm the JSON schema example in the prompt explicitly shows
+   mitre_techniques as a non-empty array.
+
+3. If RAG returns nothing, query rag-service directly:
+
+     docker exec rag-service curl -s -X POST http://localhost:8000/retrieve `
+       -H "Content-Type: application/json" `
+       -d '{\"query\":\"Multiple failed RDP logins brute force\",\"top_k\":3}'
+
+   Should return MITRE technique IDs and descriptions. If empty, the
+   ChromaDB hasn't been ingested - need to run the MITRE ATT&CK STIX
+   ingest into ChromaDB.
+
+
+LIKELY FIX
+----------
+
+Most probable: RAG returns MITRE techniques, but the LLM (3B) is dropping
+the field. Two-pronged fix:
+
+a) Strengthen the prompt template's JSON example to show
+   mitre_techniques populated with real-looking values like ["T1110.001",
+   "T1078"]
+
+b) Add a fallback: if LLM output has empty mitre_techniques but RAG
+   returned techniques, populate mitre_techniques from RAG directly.
+   This is more deterministic and doesn't depend on LLM compliance.
+
+For path (b), the code change is in alert-triage's context_manager or
+llm_client - take the RAG-returned techniques and ensure they end up in
+TriageResponse.mitre_techniques even if the LLM omitted them.
+
+
+VERIFICATION CRITERIA
+---------------------
+
+  [ ] A smoke test produces non-empty mitre_techniques in the response
+  [ ] TheHive case has mitre:TXXXX tags for relevant techniques
+
+
+================================================================================
+   ORDER OF EXECUTION WHEN YOU COME BACK
+================================================================================
+
+Recommended:
+
+  1. Do Part A first (~15 min) - completes the real end-to-end flow
+  2. While doing Part A, inspect alert-triage logs - if you see RAG
+     returning MITRE techniques but they're not in the response, do Part B
+  3. If Part A real-alert test surfaces MITRE techniques naturally (via
+     the rule.mitre block in real Wazuh alerts), Part B might already be
+     resolved without code changes
+
+
+================================================================================
+   END OF FILE
+================================================================================
