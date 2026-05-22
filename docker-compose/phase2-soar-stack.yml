@@ -361,7 +361,10 @@ services:
     environment:
       - discovery.type=single-node
       - bootstrap.memory_lock=true
-      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      # Bumped from 512m -> 1g -> 1.5g after repeated crashes during Shuffle
+      # app uploads. JobSweeper + cluster info updates were missing their 15s
+      # health window under GC pressure, triggering process supervisor restarts.
+      - "OPENSEARCH_JAVA_OPTS=-Xms1500m -Xmx1500m"
       - DISABLE_SECURITY_PLUGIN=true
       - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_PASSWORD:-Admin123!@#}
 
@@ -389,11 +392,13 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
-          cpus: '1.0'
+          # JVM heap is 1500m; container needs headroom for OS + off-heap memory.
+          # Container memory limit must be > heap, or JVM OOM-loops at startup.
+          memory: 2500M
+          cpus: '2.0'
         reservations:
-          memory: 512M
-          cpus: '0.5'
+          memory: 1500M
+          cpus: '1.0'
 
 # ==============================================================================
 # NETWORKS
