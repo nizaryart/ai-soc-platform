@@ -100,6 +100,45 @@ This forces git to preserve LF endings regardless of platform.
 
 ---
 
+## 4. Cortex 3.1.7 vs modern analyzer images — known incompatibility
+
+**Status:** Architectural decision, not a bug. Documented for context.
+
+**Symptom:** Cortex spawns the analyzer container successfully (Docker socket mount works, image pulls work), but the analyzer fails immediately at startup with:
+
+```
+File "/root/.local/lib/python3.14/site-packages/cortexutils/worker.py", line 37
+    self._input = json.load(sys.stdin)
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+```
+
+**Root cause:** Cortex 3.1.7 (released 2022) passes analyzer input via a job directory file (`/job/input/input.json`). The `ghcr.io/thehive-project/*` analyzer images were rebuilt in 2025 using a newer `cortexutils` library that reads from `sys.stdin` instead. Stdin is empty when Cortex 3 invokes the container → JSON decode error on empty string.
+
+This is an upstream maintenance gap — Cortex 3 is essentially frozen while analyzer images continue to be rebuilt with newer dependencies.
+
+**What still works:**
+- Cortex is deployed and reachable
+- TheHive ↔ Cortex API integration (the case "Run Analyzer" button triggers correctly)
+- All 4 analyzers enabled and configured with valid API keys
+- The analyzer Docker images pull and start successfully
+
+**What doesn't work:** The analyzer execution itself (Cortex job result shows the JSONDecodeError).
+
+**Architectural choice:** SOAR automation workflows in this project use **Shuffle's native apps for threat intelligence** (built-in AbuseIPDB, VirusTotal, OTX, MaxMind integrations) rather than going through Cortex. This:
+- Avoids the Cortex 3 / cortexutils version drift entirely
+- Eliminates one hop (no Docker container spawn per analysis)
+- Uses the same API keys (configured in Shuffle apps, not Cortex)
+- Is the pattern used by many production SOCs that run Shuffle alongside TheHive
+
+Cortex remains deployed for manual analyst use in the TheHive UI once the upstream fixes the version drift (or when migrating to Cortex 4).
+
+**Fix paths if you want Cortex analyzers working:**
+1. Pin to older image digests that use old-cortexutils (requires Docker Hub research per analyzer)
+2. Upgrade to Cortex 4 (substantial migration — defer until stable)
+3. Wait for the upstream `ghcr.io/thehive-project/*` images to address the compat issue
+
+---
+
 ## Deploy log
 
 | Date | Event |
@@ -107,3 +146,4 @@ This forces git to preserve LF endings regardless of platform.
 | 2026-05-17 | Phase 1 SIEM stack deployed on M1 (Wazuh Manager + Indexer + Dashboard) |
 | 2026-05-17 | Wazuh index template loaded manually |
 | 2026-05-17 | All upstream config files normalized to LF line endings |
+| 2026-05-22 | Discovered Cortex 3.1.7 + new analyzer image incompatibility; pivoted SOAR workflows to Shuffle native apps |
