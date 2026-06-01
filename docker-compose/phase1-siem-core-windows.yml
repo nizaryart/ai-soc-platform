@@ -93,6 +93,9 @@ services:
       # Mount ossec.conf to the Wazuh config-mount path (merged on container start)
       - ../config/wazuh-manager/ossec.conf:/wazuh-config-mount/etc/ossec.conf:ro
       - ../datasets/logs:/var/log/external:ro
+      # Day 3 Part A: custom integration that forwards alerts to M2 AI pipeline
+      - ../config/wazuh-integrations/custom-webhook:/var/ossec/integrations/custom-webhook:ro
+      - ../config/wazuh-integrations/custom-webhook.py:/var/ossec/integrations/custom-webhook.py:ro
 
     networks:
       - siem-backend

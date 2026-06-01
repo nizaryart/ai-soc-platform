@@ -1,0 +1,8 @@
+#!/bin/sh
+# Wazuh -> M2 wazuh-integration custom webhook wrapper.
+# Called by ossec-integratord when an alert matches the <integration> filter.
+# Just invokes the sibling Python script using Wazuh's bundled Python.
+
+WPYTHON_BIN="/var/ossec/framework/python/bin/python3"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec "${WPYTHON_BIN}" "${SCRIPT_DIR}/custom-webhook.py" "$@"
