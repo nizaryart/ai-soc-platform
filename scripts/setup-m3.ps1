@@ -405,7 +405,7 @@ $composeYml = @'
 services:
 
   prometheus:
-    image: prom/prometheus:v2.55.1
+    image: prom/prometheus:v2.51.2
     container_name: obs-prometheus
     hostname: prometheus
     restart: unless-stopped
@@ -556,7 +556,7 @@ Write-Ok "observability.yml written"
 if (-not $SkipImagePull) {
     Write-Section "Pre-pulling Docker images (~3 GB total)"
     $images = @(
-        "prom/prometheus:v2.55.1",
+        "prom/prometheus:v2.51.2",
         "grafana/grafana:11.3.0",
         "grafana/loki:3.2.1",
         "grafana/promtail:3.2.1",

@@ -22,15 +22,15 @@ if (-not $SkipPull) {
 
 # 2. Test 1 - does the image even run --version
 Section "TEST 1: docker run prometheus --version"
-docker run --rm prom/prometheus:v2.55.1 --version 2>&1
+docker run --rm prom/prometheus:v2.51.2 --version 2>&1
 Write-Host "EXIT_CODE=$LASTEXITCODE"
 
 # 3. Test 2 - re-pull the image and retry
 Section "TEST 2: re-pull image and rerun --version"
-docker rmi prom/prometheus:v2.55.1 -f 2>&1 | Out-Null
-docker pull prom/prometheus:v2.55.1 2>&1 | Select-Object -Last 5
+docker rmi prom/prometheus:v2.51.2 -f 2>&1 | Out-Null
+docker pull prom/prometheus:v2.51.2 2>&1 | Select-Object -Last 5
 Write-Host "---"
-docker run --rm prom/prometheus:v2.55.1 --version 2>&1
+docker run --rm prom/prometheus:v2.51.2 --version 2>&1
 Write-Host "EXIT_CODE=$LASTEXITCODE"
 
 # 4. Test 3 - environment fingerprint
