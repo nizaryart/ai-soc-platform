@@ -417,7 +417,7 @@ services:
       - "--web.enable-admin-api"
     volumes:
       - ../config/prometheus:/etc/prometheus:ro
-      - ../data/prometheus:/prometheus
+      - prom-data:/prometheus
     ports:
       - "9090:9090"
     networks:
@@ -443,7 +443,7 @@ services:
     volumes:
       - ../config/grafana/provisioning:/etc/grafana/provisioning:ro
       - ../config/grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - ../data/grafana:/var/lib/grafana
+      - grafana-data:/var/lib/grafana
     ports:
       - "3000:3000"
     depends_on:
@@ -464,7 +464,7 @@ services:
     command: -config.file=/etc/loki/loki-config.yml
     volumes:
       - ../config/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
-      - ../data/loki:/loki
+      - loki-data:/loki
     ports:
       - "3100:3100"
     networks:
@@ -503,7 +503,7 @@ services:
       - "--storage.path=/alertmanager"
     volumes:
       - ../config/alertmanager:/etc/alertmanager:ro
-      - ../data/alertmanager:/alertmanager
+      - alertmanager-data:/alertmanager
     ports:
       - "9093:9093"
     networks:
@@ -539,6 +539,12 @@ services:
 networks:
   obs-net:
     driver: bridge
+
+volumes:
+  prom-data: {}
+  grafana-data: {}
+  loki-data: {}
+  alertmanager-data: {}
 '@
 $composeYml = $composeYml.Replace('__M3__', $M3_IP)
 Save-Utf8NoBom -Path "$RepoRoot\docker-compose\observability.yml" -Content $composeYml

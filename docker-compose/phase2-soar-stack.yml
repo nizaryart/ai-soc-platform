@@ -266,7 +266,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 120s
 
     deploy:
       resources:
@@ -319,8 +319,11 @@ services:
       - SHUFFLE_APP_SDK_VERSION=1.3.0
       - SHUFFLE_WORKER_VERSION=1.4.0
       - ORG_ID=Org_${ORG_ID:-default}
-      - ENVIRONMENT_NAME=Shuffle
-      - BASE_URL=http://shuffle-backend:5001
+      - ENVIRONMENT_NAME=Org_default
+      # BASE_URL is what orborus passes to spawned worker containers.
+      # Workers are spawned on Docker's default bridge network (not soar-backend),
+      # so they can't resolve "shuffle-backend" by name. Use host gateway instead.
+      - BASE_URL=http://host.docker.internal:5001
       - DOCKER_API_VERSION=1.40
       - SHUFFLE_BASE_IMAGE_NAME=frikky
       - SHUFFLE_BASE_IMAGE_REGISTRY=ghcr.io
