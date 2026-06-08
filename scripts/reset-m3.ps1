@@ -89,11 +89,12 @@ if (Test-Path $rogueFile) {
 # -----------------------------------------------------------------------------
 Write-Section "Regenerating configs via setup-m3.ps1"
 
-$setupArgs = @(
-    "-M3_IP", $M3_IP
-)
-if ($DiscordWebhookUrl) { $setupArgs += @("-DiscordWebhookUrl", $DiscordWebhookUrl) }
-if ($KeepImages)        { $setupArgs += @("-SkipImagePull") }
+$setupArgs = @{
+    RepoRoot = $RepoRoot
+    M3_IP    = $M3_IP
+}
+if ($DiscordWebhookUrl) { $setupArgs.DiscordWebhookUrl = $DiscordWebhookUrl }
+if ($KeepImages)        { $setupArgs.SkipImagePull    = $true }
 
 & "$RepoRoot\scripts\setup-m3.ps1" @setupArgs
 
