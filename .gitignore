@@ -26,3 +26,7 @@ Thumbs.db
 # Local notes
 notes/
 scratch/
+
+# Obsidian editor metadata
+.obsidian/
+
