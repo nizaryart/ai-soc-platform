@@ -99,13 +99,125 @@ if ($KeepImages)        { $setupArgs.SkipImagePull    = $true }
 & "$RepoRoot\scripts\setup-m3.ps1" @setupArgs
 
 # -----------------------------------------------------------------------------
-# 6. Bring the stack up
+# 6a. Validate generated configs BEFORE bringing the stack up
+# -----------------------------------------------------------------------------
+Write-Section "Validating generated configs"
+
+$validationErrors = @()
+
+function Test-FileExists($path, $desc) {
+    if (-not (Test-Path $path)) {
+        $script:validationErrors += "MISSING: $desc at $path"
+        Write-Err2 "MISSING: $desc"
+        return $false
+    }
+    return $true
+}
+
+function Test-FileNotEmpty($path, $desc) {
+    if (-not (Test-Path $path)) { return $false }
+    $size = (Get-Item $path).Length
+    if ($size -lt 10) {
+        $script:validationErrors += "EMPTY/TINY: $desc ($size bytes) at $path"
+        Write-Err2 "EMPTY/TINY ($size bytes): $desc"
+        return $false
+    }
+    return $true
+}
+
+function Test-FileNoBom($path, $desc) {
+    if (-not (Test-Path $path)) { return $false }
+    $bytes = [System.IO.File]::ReadAllBytes($path)
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        $script:validationErrors += "BOM detected: $desc at $path"
+        Write-Err2 "BOM detected (Linux tools will choke): $desc"
+        return $false
+    }
+    return $true
+}
+
+function Test-FileContains($path, $pattern, $desc) {
+    if (-not (Test-Path $path)) { return $false }
+    $content = Get-Content $path -Raw
+    if ($content -notmatch [regex]::Escape($pattern)) {
+        $script:validationErrors += "MISSING key '$pattern' in: $desc at $path"
+        Write-Err2 "MISSING content '$pattern' in: $desc"
+        return $false
+    }
+    return $true
+}
+
+function Test-NoRogueFiles($dir, $expectedFiles, $desc) {
+    if (-not (Test-Path $dir)) { return $false }
+    $actualFiles = Get-ChildItem $dir -File | Select-Object -ExpandProperty Name
+    $rogue = $actualFiles | Where-Object { $_ -notin $expectedFiles }
+    if ($rogue) {
+        foreach ($f in $rogue) {
+            $script:validationErrors += "ROGUE file in $desc : $f (will conflict with provisioning)"
+            Write-Err2 "ROGUE file in $desc : $f"
+        }
+        return $false
+    }
+    return $true
+}
+
+# Check each expected config file
+$checks = @(
+    @{ Path="$RepoRoot\config\prometheus\prometheus.yml";                          Desc="prometheus.yml";          MustContain="scrape_configs" },
+    @{ Path="$RepoRoot\config\prometheus\rules\alerts.yml";                        Desc="alerts.yml";              MustContain="groups" },
+    @{ Path="$RepoRoot\config\loki\loki-config.yml";                               Desc="loki-config.yml";         MustContain="auth_enabled" },
+    @{ Path="$RepoRoot\config\promtail\promtail-config.yml";                       Desc="promtail-config.yml";     MustContain="loki:3100" },
+    @{ Path="$RepoRoot\config\alertmanager\alertmanager.yml";                      Desc="alertmanager.yml";        MustContain="receivers" },
+    @{ Path="$RepoRoot\config\grafana\provisioning\datasources\datasources.yml";   Desc="grafana datasources.yml"; MustContain="isDefault" },
+    @{ Path="$RepoRoot\config\grafana\provisioning\dashboards\dashboards.yml";     Desc="grafana dashboards.yml";  MustContain="providers" },
+    @{ Path="$RepoRoot\docker-compose\observability.yml";                          Desc="observability.yml";       MustContain="prom-data" }
+)
+
+foreach ($c in $checks) {
+    if (Test-FileExists $c.Path $c.Desc) {
+        Test-FileNotEmpty  $c.Path $c.Desc | Out-Null
+        Test-FileNoBom     $c.Path $c.Desc | Out-Null
+        Test-FileContains  $c.Path $c.MustContain $c.Desc | Out-Null
+    }
+}
+
+# Check provisioning dirs for rogue files (this is what bit us before)
+Test-NoRogueFiles "$RepoRoot\config\grafana\provisioning\datasources" @("datasources.yml") "grafana/provisioning/datasources" | Out-Null
+Test-NoRogueFiles "$RepoRoot\config\grafana\provisioning\dashboards"  @("dashboards.yml")  "grafana/provisioning/dashboards"  | Out-Null
+
+# Final - one duplicate-default check on grafana datasources
+$dsPath = "$RepoRoot\config\grafana\provisioning\datasources\datasources.yml"
+if (Test-Path $dsPath) {
+    $defaultCount = ((Get-Content $dsPath -Raw) -split "isDefault:\s*true").Count - 1
+    if ($defaultCount -gt 1) {
+        $validationErrors += "DUPLICATE isDefault in datasources.yml ($defaultCount entries marked default)"
+        Write-Err2 "DUPLICATE isDefault: $defaultCount entries in datasources.yml"
+    }
+}
+
+if ($validationErrors.Count -gt 0) {
+    Write-Err2 ("Validation failed with {0} issues:" -f $validationErrors.Count)
+    foreach ($e in $validationErrors) { Write-Host "    - $e" -ForegroundColor Red }
+    Write-Err2 "Aborting before bringing the stack up. Fix the issues above and re-run."
+    exit 1
+}
+Write-Ok "All config files valid"
+
+# -----------------------------------------------------------------------------
+# 6b. Bring the stack up
 # -----------------------------------------------------------------------------
 Write-Section "Bringing the stack up"
 
 Push-Location $RepoRoot
-docker compose -f docker-compose\observability.yml up -d 2>&1 | Out-Host
+# Don't pipe to Out-Host - docker compose writes progress to stderr which PowerShell flags as errors
+& docker compose -f docker-compose\observability.yml up -d
+$exitCode = $LASTEXITCODE
 Pop-Location
+
+if ($exitCode -ne 0) {
+    Write-Err2 "docker compose up exited with code $exitCode"
+    exit $exitCode
+}
 
 # -----------------------------------------------------------------------------
 # 7. Wait for services to settle, then verify each one
