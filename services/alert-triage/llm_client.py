@@ -8,7 +8,7 @@ Includes prompt engineering, fallback logic, and structured output parsing.
 
 import json
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import httpx
 from config import settings
 from models import SecurityAlert, TriageResponse, SeverityLevel, AlertCategory, IOC, TriageRecommendation
@@ -103,6 +103,7 @@ class OllamaClient:
         self,
         alert: SecurityAlert,
         context: str = "",
+        rag_techniques: Optional[List[str]] = None,
     ) -> str:
         """
         Construct security-focused prompt for alert triage.
@@ -114,9 +115,15 @@ class OllamaClient:
         the specific alert.
 
         Args:
-            alert:   SecurityAlert object
-            context: Pre-formatted context string from ContextManager.
-                     Empty string means no context injection.
+            alert:          SecurityAlert object
+            context:        Pre-formatted context string from ContextManager.
+                            Empty string means no context injection.
+            rag_techniques: Optional list of MITRE technique IDs retrieved
+                            from the RAG service. Injected into the prompt
+                            so the LLM is strongly nudged to include them
+                            in its mitre_techniques output. Used as a
+                            deterministic fallback (Day 3 Part B) when the
+                            LLM omits the field entirely.
 
         Returns:
             str: Formatted prompt for LLM
@@ -125,6 +132,16 @@ class OllamaClient:
         context_section = ""
         if context:
             context_section = f"\n\n**ANALYST CONTEXT (use to inform your assessment):**\n{context}\n\n---\n"
+
+        # Inject RAG-suggested MITRE techniques so the LLM is anchored
+        if rag_techniques:
+            techniques_csv = ", ".join(rag_techniques)
+            context_section += (
+                f"\n**SUGGESTED MITRE TECHNIQUES (from threat-intel vector DB):** "
+                f"{techniques_csv}\n"
+                f"Treat these as strong candidates — include relevant ones in your "
+                f"`mitre_techniques` output unless the alert clearly does not match.\n\n---\n"
+            )
 
         prompt = f"""You are an expert cybersecurity analyst performing alert triage for a Security Operations Center (SOC).
 
@@ -145,7 +162,7 @@ class OllamaClient:
 2. **Category:** Identify attack category (malware, intrusion, exfiltration, etc)
 3. **True/False Positive:** Determine if this is a genuine threat
 4. **IOC Extraction:** Extract all Indicators of Compromise (IPs, domains, hashes, files)
-5. **MITRE ATT&CK:** Map to relevant techniques and tactics
+5. **MITRE ATT&CK:** Map to relevant techniques and tactics. **REQUIRED:** populate the `mitre_techniques` array with at least one technique ID (e.g., "T1110.001"). If unsure, prefer the SUGGESTED techniques above over leaving the field empty
 6. **Recommendations:** Provide 3-5 prioritized response actions
 
 **CRITICAL RULES:**
@@ -304,6 +321,88 @@ Begin your analysis now:"""
             logger.error(f"Error constructing TriageResponse: {e}")
             return None
 
+    async def _fetch_rag_mitre(self, alert: SecurityAlert) -> List[str]:
+        """
+        Query the rag-service for MITRE technique IDs relevant to this alert.
+
+        Used in two places:
+          1. Prompt injection — gives the LLM strong candidates to consider
+          2. Deterministic fallback — if the LLM still omits mitre_techniques,
+             we populate the field from RAG so the TheHive case never has
+             an empty MITRE tags list (Day 3 Part B).
+
+        Silent failure: returns empty list if RAG is disabled, unreachable,
+        or returns unexpected shape. Never blocks triage.
+
+        Args:
+            alert: SecurityAlert being analyzed
+
+        Returns:
+            List[str]: Deduplicated MITRE technique IDs (e.g. ["T1110.001"]).
+        """
+        if not settings.rag_enabled:
+            return []
+
+        # Build search query from the most discriminative alert fields
+        query_parts = [alert.rule_description or ""]
+        if alert.source_ip:
+            query_parts.append(f"from {alert.source_ip}")
+        if alert.user:
+            query_parts.append(f"user {alert.user}")
+        if alert.mitre_technique:
+            query_parts.extend([f"MITRE {t}" for t in alert.mitre_technique])
+        query = " ".join(p for p in query_parts if p).strip()
+
+        if not query:
+            return []
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(
+                    f"{settings.rag_service_url}/retrieve",
+                    json={
+                        "query": query,
+                        "collection": "mitre_attack",
+                        "top_k": settings.rag_top_k,
+                        "min_similarity": 0.5,
+                    },
+                )
+
+            if response.status_code != 200:
+                logger.debug(
+                    f"RAG returned {response.status_code} for alert {alert.alert_id}"
+                )
+                return []
+
+            data = response.json()
+            techniques: List[str] = []
+            for r in data.get("results", []):
+                tid = (r.get("metadata") or {}).get("technique_id")
+                if tid:
+                    techniques.append(tid)
+
+            # Dedupe while preserving the (relevance-ranked) order
+            seen = set()
+            deduped = []
+            for t in techniques:
+                if t not in seen:
+                    seen.add(t)
+                    deduped.append(t)
+
+            if deduped:
+                logger.info(
+                    f"RAG retrieved {len(deduped)} MITRE techniques for "
+                    f"alert {alert.alert_id}: {deduped}"
+                )
+            return deduped
+
+        except httpx.TimeoutException:
+            logger.debug(f"RAG timeout for alert {alert.alert_id}")
+            return []
+        except Exception as e:
+            logger.debug(f"RAG fetch failed for alert {alert.alert_id}: {e}")
+            return []
+
     async def analyze_alert(self, alert: SecurityAlert) -> Optional[TriageResponse]:
         """
         Main entrypoint: Analyze security alert using LLM with ML enhancement.
@@ -311,10 +410,12 @@ Begin your analysis now:"""
         Workflow:
         1. Attempt ML prediction for additional context
         2. Fetch contextual memory (environment, alert history, analyst feedback)
-        3. Inject context into base prompt, then enrich with ML signal
+        2.5 Fetch MITRE techniques from RAG (Day 3 Part B fallback)
+        3. Inject context + RAG techniques into base prompt, then enrich with ML signal
         4. Try primary model (Foundation-Sec-8B)
         5. Fall back to secondary model (LLaMA 3.1) if primary fails
-        6. Return None if both fail
+        6. Backfill mitre_techniques from RAG if LLM omitted them
+        7. Return None if all models failed
 
         Args:
             alert: SecurityAlert to analyze
@@ -335,7 +436,16 @@ Begin your analysis now:"""
 
         # Step 2: Fetch contextual memory and inject into base prompt
         context_block = await self.context_manager.build_context(alert)
-        base_prompt = self._build_triage_prompt(alert, context=context_block)
+
+        # Step 2.5: Fetch MITRE techniques from RAG service. Used for prompt
+        # injection AND as deterministic fallback if the LLM omits the field.
+        rag_techniques = await self._fetch_rag_mitre(alert)
+
+        base_prompt = self._build_triage_prompt(
+            alert,
+            context=context_block,
+            rag_techniques=rag_techniques,
+        )
 
         # Step 3: Enrich with ML prediction signal
         enriched_prompt = enrich_llm_prompt_with_ml(base_prompt, ml_prediction)
@@ -355,6 +465,13 @@ Begin your analysis now:"""
                 if ml_prediction:
                     response.ml_prediction = ml_prediction.prediction
                     response.ml_confidence = ml_prediction.confidence
+                # Day 3 Part B: backfill mitre_techniques from RAG if LLM omitted
+                if not response.mitre_techniques and rag_techniques:
+                    response.mitre_techniques = rag_techniques
+                    logger.info(
+                        f"Backfilled mitre_techniques from RAG for "
+                        f"{alert.alert_id}: {rag_techniques}"
+                    )
                 logger.info(f"Alert {alert.alert_id} analyzed successfully")
                 return response
 
@@ -373,6 +490,13 @@ Begin your analysis now:"""
                 if ml_prediction:
                     response.ml_prediction = ml_prediction.prediction
                     response.ml_confidence = ml_prediction.confidence
+                # Day 3 Part B: backfill mitre_techniques from RAG if LLM omitted
+                if not response.mitre_techniques and rag_techniques:
+                    response.mitre_techniques = rag_techniques
+                    logger.info(
+                        f"Backfilled mitre_techniques from RAG for "
+                        f"{alert.alert_id}: {rag_techniques}"
+                    )
                 logger.info(f"Alert {alert.alert_id} analyzed with fallback model")
                 return response
 

@@ -43,9 +43,12 @@ class Settings(BaseSettings):
     ml_timeout: int = 10
     ml_default_model: str = "random_forest"
 
-    # RAG Configuration (for future Phase 3.2)
-    rag_enabled: bool = False
-    rag_service_url: Optional[str] = "http://rag-service:8001"
+    # RAG Configuration - enabled in Day 3 Part B as deterministic fallback
+    # for empty mitre_techniques when the LLM forgets to populate the field.
+    # Override with TRIAGE_RAG_ENABLED=false if rag-service is unavailable.
+    # rag-service exposes port 8000 internally (mapped to 8300 externally).
+    rag_enabled: bool = True
+    rag_service_url: Optional[str] = "http://rag-service:8000"
     rag_top_k: int = 3
 
     # Wazuh Integration
