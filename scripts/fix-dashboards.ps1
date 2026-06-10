@@ -22,12 +22,16 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Datasource name substitutions (must match names in grafana/provisioning/datasources/datasources.yml)
+# Datasource UID substitutions (must match the `uid:` values in
+# grafana/provisioning/datasources/datasources.yml — those are LOWERCASE
+# `prometheus` and `loki` so dashboard panels resolve correctly).
 $dsMap = @{
-    '${DS_PROMETHEUS}'   = 'Prometheus'
-    '${DS_LOKI}'         = 'Loki'
-    '$${DS_PROMETHEUS}'  = 'Prometheus'
-    '$${DS_LOKI}'        = 'Loki'
+    '${DS_PROMETHEUS}'   = 'prometheus'
+    '${DS_LOKI}'         = 'loki'
+    '$${DS_PROMETHEUS}'  = 'prometheus'
+    '$${DS_LOKI}'        = 'loki'
+    '"Prometheus"'       = '"prometheus"'
+    '"Loki"'             = '"loki"'
 }
 
 # Top-level keys to strip (grafana.com export wrapper)
