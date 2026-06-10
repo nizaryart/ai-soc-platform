@@ -155,7 +155,9 @@ class OllamaClient:
 - Destination IP: {alert.dest_ip or 'N/A'}
 - User: {alert.user or 'N/A'}
 - Process: {alert.process or 'N/A'}
-- Raw Log: {alert.raw_log or 'N/A'}
+- **Command line:** {alert.command or 'N/A'}
+- **File path:** {alert.file_path or 'N/A'}
+- Raw Log: {(alert.raw_log or 'N/A')[:600]}
 
 **YOUR ANALYSIS MUST INCLUDE:**
 1. **Severity Assessment:** Classify as critical/high/medium/low/informational

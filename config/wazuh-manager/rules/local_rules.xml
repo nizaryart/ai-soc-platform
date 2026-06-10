@@ -1,0 +1,148 @@
+<!--
+  AI-SOC custom rules — local tuning
+  ===================================
+  Wazuh rule ID convention:
+    100000–100999  = noise suppression / false-positive tuning
+    101000–101999  = custom detections (Sysmon Event 1 based, command-aware)
+    102000+        = compliance / future categories
+
+  Sysmon parent rules we chain off:
+    61603 = Sysmon Event 1 (ProcessCreate)  -- has win.eventdata.commandLine, parentImage, hashes
+    61604 = Sysmon Event 1 with command line containing whitelist/blacklist matches
+    61608 = Sysmon Event 3 (NetworkConnect)
+    61610 = Sysmon Event 7 (ImageLoad)
+    61613 = Sysmon Event 11 (FileCreate)  -- this is what rule 92213 chains off
+-->
+
+<group name="custom,local,">
+
+  <!-- ============================================================ -->
+  <!-- 100000-100099  : Noise suppression                            -->
+  <!-- ============================================================ -->
+
+  <!-- 100001: PowerShell's built-in execution-policy probe.
+       Fires constantly on every PS invocation. NOT malicious. -->
+  <rule id="100001" level="0">
+    <if_sid>92213</if_sid>
+    <field name="win.eventdata.targetFilename">__PSScriptPolicyTest_</field>
+    <description>Suppress: PowerShell ExecutionPolicy probe (built-in Microsoft behavior, harmless)</description>
+  </rule>
+
+  <!-- 100002: csc.exe (.NET C# compiler) writes temp DLLs to AppData\Local\Temp.
+       Benign during normal .NET app runtime / build. -->
+  <rule id="100002" level="0">
+    <if_sid>92213</if_sid>
+    <field name="win.eventdata.image">csc\.exe$</field>
+    <description>Suppress: csc.exe temp DLL output (benign .NET compilation)</description>
+  </rule>
+
+  <!-- 100003: Microsoft Edge WebView2 temp files -->
+  <rule id="100003" level="0">
+    <if_sid>92213</if_sid>
+    <field name="win.eventdata.image">msedgewebview</field>
+    <description>Suppress: Edge WebView2 runtime cache (benign)</description>
+  </rule>
+
+
+  <!-- ============================================================ -->
+  <!-- 101000-101099  : High-value Sysmon-based detections            -->
+  <!--                                                                -->
+  <!-- All these fire on Sysmon Event 1 (ProcessCreate)                -->
+  <!-- which means the alert carries the FULL commandLine, parentImage, -->
+  <!-- and hash fields that our AI pipeline needs.                     -->
+  <!-- ============================================================ -->
+
+  <!-- 101001: PowerShell download cradle  -- IEX + DownloadString combo -->
+  <rule id="101001" level="13">
+    <if_sid>61603</if_sid>
+    <field name="win.eventdata.image" type="pcre2">(?i)\\(powershell|pwsh)\.exe$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(IEX|Invoke-Expression).*(DownloadString|DownloadFile|WebClient|Net\.WebRequest)</field>
+    <description>Suspicious PowerShell download cradle: $(win.eventdata.commandLine)</description>
+    <mitre>
+      <id>T1059.001</id>
+      <id>T1105</id>
+    </mitre>
+  </rule>
+
+  <!-- 101002: PowerShell with encoded/hidden flags  (-enc, -encodedcommand, -nop, -w hidden) -->
+  <rule id="101002" level="12">
+    <if_sid>61603</if_sid>
+    <field name="win.eventdata.image" type="pcre2">(?i)\\(powershell|pwsh)\.exe$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(-enc(odedcommand)?|-nop(rofile)?|-w(indowstyle)? hidden|-ep bypass|FromBase64String)</field>
+    <description>PowerShell with obfuscation/stealth flags: $(win.eventdata.commandLine)</description>
+    <mitre>
+      <id>T1059.001</id>
+      <id>T1027</id>
+    </mitre>
+  </rule>
+
+  <!-- 101003: LOLBin abuse — common living-off-the-land binaries used by attackers -->
+  <rule id="101003" level="12">
+    <if_sid>61603</if_sid>
+    <field name="win.eventdata.image" type="pcre2">(?i)\\(certutil|bitsadmin|mshta|regsvr32|rundll32|wmic|wscript|cscript)\.exe$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(http|ftp|\\\\|/decode|/urlcache)</field>
+    <description>LOLBin abuse: $(win.eventdata.image) used to fetch remote content. cmd: $(win.eventdata.commandLine)</description>
+    <mitre>
+      <id>T1218</id>
+      <id>T1105</id>
+    </mitre>
+  </rule>
+
+  <!-- 101004: Credential dumping tools (Mimikatz family + variants) -->
+  <rule id="101004" level="14">
+    <if_sid>61603</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(mimikatz|sekurlsa|lsadump|samdump|hashdump|wdigest|kerberos::|crypto::|misc::|privilege::|token::|process::|service::|event::|net::|ts::|vault::|busylight::|sysenv::|ngc::|dpapi::)</field>
+    <description>Credential dumping pattern detected: $(win.eventdata.commandLine)</description>
+    <mitre>
+      <id>T1003</id>
+      <id>T1003.001</id>
+    </mitre>
+  </rule>
+
+  <!-- 101005: Suspicious parent-child process chains
+       (e.g., Office spawning cmd/powershell — classic phishing payload) -->
+  <rule id="101005" level="13">
+    <if_sid>61603</if_sid>
+    <field name="win.eventdata.parentImage" type="pcre2">(?i)\\(winword|excel|powerpnt|outlook|mspub|visio|onenote)\.exe$</field>
+    <field name="win.eventdata.image" type="pcre2">(?i)\\(cmd|powershell|pwsh|wscript|cscript|rundll32|regsvr32|mshta)\.exe$</field>
+    <description>Office process spawned scripting host: $(win.eventdata.parentImage) -> $(win.eventdata.image)</description>
+    <mitre>
+      <id>T1059</id>
+      <id>T1566.001</id>
+    </mitre>
+  </rule>
+
+  <!-- 101006: Network connection from non-browser process to public IP (basic C2 hunt) -->
+  <rule id="101006" level="10">
+    <if_sid>61608</if_sid>
+    <field name="win.eventdata.image" type="pcre2">(?i)\\(powershell|pwsh|cmd|certutil|bitsadmin|regsvr32|rundll32|mshta|wscript|cscript)\.exe$</field>
+    <field name="win.eventdata.destinationIsIpv6">false</field>
+    <description>Suspicious outbound network connection from $(win.eventdata.image) to $(win.eventdata.destinationIp):$(win.eventdata.destinationPort)</description>
+    <mitre>
+      <id>T1071</id>
+    </mitre>
+  </rule>
+
+  <!-- 101007: Scheduled task creation via schtasks.exe (persistence) -->
+  <rule id="101007" level="11">
+    <if_sid>61603</if_sid>
+    <field name="win.eventdata.image" type="pcre2">(?i)\\schtasks\.exe$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)/create</field>
+    <description>Scheduled task created: $(win.eventdata.commandLine)</description>
+    <mitre>
+      <id>T1053.005</id>
+    </mitre>
+  </rule>
+
+  <!-- 101008: Service creation via sc.exe (persistence / privilege escalation) -->
+  <rule id="101008" level="11">
+    <if_sid>61603</if_sid>
+    <field name="win.eventdata.image" type="pcre2">(?i)\\sc\.exe$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)\bcreate\b</field>
+    <description>Windows service created via sc.exe: $(win.eventdata.commandLine)</description>
+    <mitre>
+      <id>T1543.003</id>
+    </mitre>
+  </rule>
+
+</group>

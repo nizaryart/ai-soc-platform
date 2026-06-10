@@ -79,6 +79,47 @@ class AIClient:
             elif data.dstuser:
                 triage_payload["user"] = data.dstuser
 
+            # ----------------------------------------------------------
+            # Sysmon eventdata enrichment (Day-3.5: command-aware AI)
+            # ----------------------------------------------------------
+            # Sysmon Event 1 (ProcessCreate) carries the full command line
+            # and parent chain. Without these fields surfacing in the
+            # SecurityAlert sent to alert-triage, the LLM has nothing
+            # concrete to reason about (see TheHive case #179 verdict).
+            #
+            # Wazuh nests these under data.win.eventdata.* — pull the
+            # high-value ones into first-class SecurityAlert fields so
+            # the LLM prompt has structured access.
+            win = data.win if isinstance(data.win, dict) else None
+            if win:
+                ed = win.get("eventdata") or {}
+
+                # Process / command (Sysmon Event 1 — ProcessCreate)
+                if ed.get("commandLine"):
+                    triage_payload["command"] = ed.get("commandLine")
+                if ed.get("image"):
+                    triage_payload["process"] = ed.get("image")
+                # File path (Sysmon Event 11 — FileCreate / Event 23 — FileDelete)
+                if ed.get("targetFilename"):
+                    triage_payload["file_path"] = ed.get("targetFilename")
+                # User context (typically Domain\User)
+                if ed.get("user") and not triage_payload.get("user"):
+                    triage_payload["user"] = ed.get("user")
+
+                # Parent process chain + hashes go into full_log for the LLM
+                # to read as additional context (no first-class fields exist).
+                extra_ctx = {}
+                for key in ("parentImage", "parentCommandLine", "parentProcessGuid",
+                            "hashes", "originalFileName", "fileVersion",
+                            "company", "description", "product",
+                            "integrityLevel", "logonId", "currentDirectory",
+                            "destinationIp", "destinationPort", "protocol",
+                            "queryName", "queryResults"):
+                    if ed.get(key):
+                        extra_ctx[key] = ed.get(key)
+                if extra_ctx:
+                    triage_payload["sysmon_context"] = extra_ctx
+
         return triage_payload
 
     async def analyze_alert(self, wazuh_alert: WazuhAlert) -> Dict[str, Any]:

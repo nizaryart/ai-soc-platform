@@ -96,6 +96,9 @@ services:
       # Day 3 Part A: custom integration that forwards alerts to M2 AI pipeline
       - ../config/wazuh-integrations/custom-webhook:/var/ossec/integrations/custom-webhook:ro
       - ../config/wazuh-integrations/custom-webhook.py:/var/ossec/integrations/custom-webhook.py:ro
+      # Custom rules: PSScriptPolicyTest suppression + Sysmon Event-1 detections
+      # (gives AI command-line context per case_id #179 self-diagnosis)
+      - ../config/wazuh-manager/rules/local_rules.xml:/var/ossec/etc/rules/local_rules.xml:ro
 
     networks:
       - siem-backend
