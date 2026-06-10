@@ -365,13 +365,18 @@ Write-Section "Writing Grafana provisioning"
 $grafanaDs = @'
 apiVersion: 1
 datasources:
+  # Explicit `uid:` is critical - dashboards from grafana.com bake the UID
+  # into every panel. If Grafana auto-generates UIDs, dashboards point at
+  # non-existent datasources and silently show "No data" everywhere.
   - name: Prometheus
+    uid: prometheus
     type: prometheus
     access: proxy
     url: http://prometheus:9090
     isDefault: true
     editable: true
   - name: Loki
+    uid: loki
     type: loki
     access: proxy
     url: http://loki:3100
