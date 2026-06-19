@@ -64,11 +64,15 @@
     </mitre>
   </rule>
 
-  <!-- 101002: PowerShell with encoded/hidden flags  (-enc, -encodedcommand, -nop, -w hidden) -->
+  <!-- 101002: PowerShell with HIGH-FIDELITY obfuscation indicators only.
+       Tuned 2026-06-19 to stop firing on legit dev tooling (claude-code,
+       installers, VS Code tasks) that uses -NoProfile or -ExecutionPolicy
+       Bypass routinely. Only encoded payloads and hidden windows are
+       reliably attacker-aligned; -nop and -ep bypass alone are too noisy. -->
   <rule id="101002" level="12">
     <if_sid>61603</if_sid>
     <field name="win.eventdata.image" type="pcre2">(?i)\\(powershell|pwsh)\.exe$</field>
-    <field name="win.eventdata.commandLine" type="pcre2">(?i)(-enc(odedcommand)?|-nop(rofile)?|-w(indowstyle)? hidden|-ep bypass|FromBase64String)</field>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(-enc(odedcommand)?\b|-w(indowstyle)?\s+hidden\b|FromBase64String)</field>
     <description>PowerShell with obfuscation/stealth flags: $(win.eventdata.commandLine)</description>
     <mitre>
       <id>T1059.001</id>

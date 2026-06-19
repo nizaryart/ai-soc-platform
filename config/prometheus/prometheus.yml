@@ -57,6 +57,25 @@ scrape_configs:
         labels:
           component: 'infrastructure'
           service: 'containers'
+          host: 'M3'
+
+  # M1 cAdvisor — runs as part of docker-compose/observability-edge.yml on M1
+  - job_name: 'cadvisor-m1'
+    static_configs:
+      - targets: ['192.168.100.124:8081']
+        labels:
+          component: 'infrastructure'
+          service: 'containers'
+          host: 'M1'
+
+  # M2 cAdvisor — runs as part of docker-compose/observability-edge.yml on M2
+  - job_name: 'cadvisor-m2'
+    static_configs:
+      - targets: ['192.168.100.152:8081']
+        labels:
+          component: 'infrastructure'
+          service: 'containers'
+          host: 'M2'
 
   # ============================================================================
   # SIEM Stack

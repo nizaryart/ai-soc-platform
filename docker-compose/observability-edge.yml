@@ -1,0 +1,115 @@
+# ============================================================================
+# Edge Observability Stack — runs on M1 and M2
+# ============================================================================
+# Purpose: ship container metrics (cAdvisor) and container logs (Promtail)
+# from M1/M2 to M3's Prometheus + Loki.
+#
+# Usage:
+#   M1:  HOST_LABEL=M1  docker compose -f docker-compose/observability-edge.yml up -d
+#   M2:  HOST_LABEL=M2  docker compose -f docker-compose/observability-edge.yml up -d
+#
+# Prereqs:
+#   - Windows Firewall: open TCP 8081 inbound on M1 and M2 so M3's Prometheus
+#     can scrape (a one-time admin step; commands provided in the deploy notes).
+#   - M3's Prometheus scrape config must include cadvisor-m1 / cadvisor-m2 jobs
+#     (already added to config/prometheus/prometheus.yml).
+#   - M3's Loki must be reachable from M1/M2 on TCP 3100 (default behaviour).
+# ============================================================================
+
+services:
+  # --------------------------------------------------------------------------
+  # cAdvisor — per-container CPU / RAM / I/O / net metrics
+  # --------------------------------------------------------------------------
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: obs-edge-cadvisor
+    hostname: obs-edge-cadvisor
+    restart: unless-stopped
+    privileged: true
+
+    ports:
+      - "8081:8080"
+
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+
+    command:
+      - '-housekeeping_interval=15s'
+      - '-docker_only=true'
+      - '-store_container_labels=false'
+
+    networks:
+      - obs-edge
+
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+
+  # --------------------------------------------------------------------------
+  # Promtail — ships THIS host's docker logs to M3's Loki
+  # --------------------------------------------------------------------------
+  promtail:
+    image: grafana/promtail:2.9.4
+    container_name: obs-edge-promtail
+    hostname: obs-edge-promtail
+    restart: unless-stopped
+
+    environment:
+      - HOST_LABEL=${HOST_LABEL:-unknown}
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ../config/promtail/promtail-edge.yml:/etc/promtail/config.yml:ro
+      - promtail-positions:/tmp
+
+    command:
+      - "-config.file=/etc/promtail/config.yml"
+      - "-config.expand-env=true"
+
+    networks:
+      - obs-edge
+
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.3'
+
+networks:
+  obs-edge:
+    driver: bridge
+
+volumes:
+  promtail-positions:
+    driver: local
+
+# ============================================================================
+# DEPLOY NOTES
+# ============================================================================
+#
+# After `docker compose ... up -d`:
+#
+# 1. Confirm cAdvisor is reachable from the host:
+#      curl http://localhost:8081/healthz
+#
+# 2. Confirm cAdvisor is reachable from M3 (run on M3):
+#      Invoke-WebRequest http://192.168.100.124:8081/metrics  -UseBasicParsing
+#      Invoke-WebRequest http://192.168.100.152:8081/metrics  -UseBasicParsing
+#
+# 3. Confirm Promtail is shipping logs (run on M3 — query Loki):
+#      curl 'http://localhost:3100/loki/api/v1/label/host/values'
+#    Expected output should include "M1" and "M2".
+#
+# ============================================================================

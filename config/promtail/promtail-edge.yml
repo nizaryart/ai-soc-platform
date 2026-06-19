@@ -1,0 +1,48 @@
+# ============================================================================
+# Promtail Edge Configuration — used by M1 and M2 to ship logs to M3's Loki
+# ============================================================================
+# Differences from the M3 (same-host) promtail-config.yaml:
+#   - Pushes to M3's Loki via LAN IP (192.168.100.8:3100) not docker DNS.
+#   - Stamps every log line with a `host` label taken from $HOST_LABEL so
+#     Grafana queries can filter by source machine (M1 / M2).
+#   - Run with `-config.expand-env=true` so ${HOST_LABEL} resolves.
+# ============================================================================
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://192.168.100.8:3100/loki/api/v1/push
+    external_labels:
+      host: ${HOST_LABEL}
+      cluster: ai-soc
+
+scrape_configs:
+  # ----------------------------------------------------------------------
+  # Docker container logs (everything Docker Desktop is running)
+  # ----------------------------------------------------------------------
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+    # Drop historical logs older than Loki's retention window. Without this,
+    # Promtail replays months of container history on first start and Loki
+    # rejects every batch with HTTP 400 "timestamp too old".
+    pipeline_stages:
+      - drop:
+          older_than: 24h
+          drop_counter_reason: older_than_24h
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container'
+      - source_labels: ['__meta_docker_container_log_stream']
+        target_label: 'stream'
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: 'service'
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_project']
+        target_label: 'project'
