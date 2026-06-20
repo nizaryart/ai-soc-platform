@@ -176,12 +176,24 @@ class TheHiveClient:
                 result.false_positive_reason,
             ])
 
-        # Recommendations become case tasks
+        # Recommendations become case tasks.
+        # TheHive caps task titles at 128 chars; LLM-generated `action` strings
+        # often blow past that, which rejects the whole case with HTTP 400.
+        # Truncate the title and stash the full action in the description so
+        # no content is lost.
         tasks = []
         for rec in result.recommendations or []:
+            prefix = f"[P{rec.priority}] "
+            full_title = f"{prefix}{rec.action}"
+            if len(full_title) > 128:
+                title = full_title[:125] + "..."
+                description = f"**Action (full):** {rec.action}\n\n{rec.rationale}"
+            else:
+                title = full_title
+                description = rec.rationale
             tasks.append({
-                "title": f"[P{rec.priority}] {rec.action}",
-                "description": rec.rationale,
+                "title": title,
+                "description": description,
                 "status": "Waiting",
             })
 
