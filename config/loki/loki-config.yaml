@@ -41,3 +41,9 @@ limits_config:
   max_query_length: 721h  # ~30 days
   ingestion_rate_mb: 10
   ingestion_burst_size_mb: 20
+  # Tolerate clock skew between source machines and Loki.
+  # Default is 10m (creation_grace_period) — too strict for multi-host setups
+  # where any of M1/M2/M3 can briefly drift before NTP re-syncs.
+  creation_grace_period: 2h
+  # Also accept historical logs on first ingest after a container restart.
+  reject_old_samples: false
