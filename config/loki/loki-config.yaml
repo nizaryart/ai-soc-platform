@@ -47,3 +47,8 @@ limits_config:
   creation_grace_period: 2h
   # Also accept historical logs on first ingest after a container restart.
   reject_old_samples: false
+  # Loki 3.x defaults this to true, which requires schema v13 + tsdb.
+  # Our schema_config still uses v11 + boltdb-shipper (intentional — migrating
+  # the schema would dump existing chunks). Disable structured metadata until
+  # we upgrade the schema.
+  allow_structured_metadata: false
