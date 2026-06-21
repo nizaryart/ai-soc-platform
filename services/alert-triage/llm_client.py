@@ -6,6 +6,7 @@ Handles communication with Ollama API for security alert analysis.
 Includes prompt engineering, fallback logic, and structured output parsing.
 """
 
+import asyncio
 import json
 import logging
 from typing import Optional, Dict, Any, List
@@ -16,6 +17,16 @@ from ml_client import MLInferenceClient, MLPrediction, enrich_llm_prompt_with_ml
 from context_manager import ContextManager
 
 logger = logging.getLogger(__name__)
+
+
+# Class-level semaphore: only one Ollama HTTP call may be in flight at a time
+# across the entire alert-triage process. Reason: llama3.2:3b on CPU thrashes
+# when 2+ requests are interleaved by Ollama — each request slows by ~3-5x,
+# blows past the httpx timeout, and triggers fallback retries that pile on
+# more in-flight requests, creating a death spiral that requires manual
+# container restart to clear. Serializing here keeps each request at its
+# normal per-request latency (~30-90s) and stops the spiral at the source.
+_OLLAMA_SEMAPHORE = asyncio.Semaphore(1)
 
 
 # Category normalization map for LLM responses
@@ -221,38 +232,42 @@ Begin your analysis now:"""
         Returns:
             Optional[str]: Model response or None on error
         """
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                payload = {
-                    "model": model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": temperature,
-                        "num_predict": settings.max_tokens,
-                    },
-                    "format": "json"  # Request JSON output
-                }
+        # Serialize Ollama calls across the whole process. See module-level
+        # _OLLAMA_SEMAPHORE docstring for rationale.
+        async with _OLLAMA_SEMAPHORE:
+            queue_wait_done = True  # marker for clarity in profiling later
+            try:
+                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                    payload = {
+                        "model": model,
+                        "prompt": prompt,
+                        "stream": False,
+                        "options": {
+                            "temperature": temperature,
+                            "num_predict": settings.max_tokens,
+                        },
+                        "format": "json"  # Request JSON output
+                    }
 
-                logger.info(f"Calling Ollama model: {model}")
-                response = await client.post(
-                    f"{self.base_url}/api/generate",
-                    json=payload
-                )
+                    logger.info(f"Calling Ollama model: {model}")
+                    response = await client.post(
+                        f"{self.base_url}/api/generate",
+                        json=payload
+                    )
 
-                if response.status_code == 200:
-                    result = response.json()
-                    return result.get("response")
-                else:
-                    logger.error(f"Ollama API error: {response.status_code} - {response.text}")
-                    return None
+                    if response.status_code == 200:
+                        result = response.json()
+                        return result.get("response")
+                    else:
+                        logger.error(f"Ollama API error: {response.status_code} - {response.text}")
+                        return None
 
-        except httpx.TimeoutException:
-            logger.error(f"Ollama request timeout after {self.timeout}s")
-            return None
-        except Exception as e:
-            logger.error(f"Ollama API call failed: {e}")
-            return None
+            except httpx.TimeoutException:
+                logger.error(f"Ollama request timeout after {self.timeout}s")
+                return None
+            except Exception as e:
+                logger.error(f"Ollama API call failed: {e}")
+                return None
 
     def _parse_llm_response(
         self,

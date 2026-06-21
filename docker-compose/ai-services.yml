@@ -60,7 +60,10 @@ services:
       - TRIAGE_PRIMARY_MODEL=${OLLAMA_MODEL:-llama3.1:8b-instruct-q4_K_M}
       - TRIAGE_ML_API_URL=http://ml-inference:8000
       - TRIAGE_RAG_SERVICE_URL=http://rag-service:8000
-      - TRIAGE_LLM_TIMEOUT=${TRIAGE_LLM_TIMEOUT:-300}
+      # Generous timeout (1000s) — but only safe when alert-triage serializes
+      # Ollama calls (semaphore in llm_client.py). Without the semaphore, this
+      # would let stuck requests hold a slot for 16+ minutes.
+      - TRIAGE_LLM_TIMEOUT=${TRIAGE_LLM_TIMEOUT:-1000}
       # TheHive integration - original addition (upstream OnyxLab declared the
       # config but never implemented the code). See services/alert-triage/thehive_client.py
       - TRIAGE_THEHIVE_URL=${THEHIVE_URL}
