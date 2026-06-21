@@ -30,3 +30,8 @@ scratch/
 # Obsidian editor metadata
 .obsidian/
 
+@
+  disktest.txt
+  test_alert.json
+  test_payload.py
+  
