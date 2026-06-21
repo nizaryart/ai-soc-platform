@@ -43,6 +43,26 @@
     <description>Suppress: Edge WebView2 runtime cache (benign)</description>
   </rule>
 
+  <!-- 100004: Microsoft Edge auto-updater. Drops resource DLLs and the
+       updater EXE into AppData\Local\Temp\EU*.tmp\ and
+       AppData\Local\Microsoft\EdgeUpdate\. Signed Microsoft binary.
+       NOTE: stored win.eventdata.image uses doubled backslashes — use a
+       simple substring instead of a backslash-anchored regex. -->
+  <rule id="100004" level="0">
+    <if_sid>92213</if_sid>
+    <field name="win.eventdata.image" type="pcre2">(?i)EdgeUpdate</field>
+    <description>Suppress: Microsoft Edge auto-updater dropping its own files (benign)</description>
+  </rule>
+
+  <!-- 100005: Docker Desktop auto-updater. com.docker.backend.exe writes
+       a fresh Docker Desktop Updater-*.exe into AppData\Local\Temp\DockerDesktopUpdates\
+       on update check. Signed Docker binary. -->
+  <rule id="100005" level="0">
+    <if_sid>92213</if_sid>
+    <field name="win.eventdata.image" type="pcre2">(?i)com\.docker\.backend\.exe</field>
+    <description>Suppress: Docker Desktop auto-updater dropping its updater binary (benign)</description>
+  </rule>
+
 
   <!-- ============================================================ -->
   <!-- 101000-101099  : High-value Sysmon-based detections            -->

@@ -29,7 +29,7 @@ from urllib import request as urlreq
 from urllib import error as urlerr
 
 LOG_FILE = "/var/ossec/logs/integrations.log"
-TIMEOUT_SECONDS = 5
+TIMEOUT_SECONDS = 120
 ERR_BAD_ARGS = 2
 ERR_READ_FILE = 6
 
