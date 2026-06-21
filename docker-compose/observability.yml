@@ -1,0 +1,143 @@
+services:
+
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    container_name: obs-prometheus
+    hostname: prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+      - "--web.enable-admin-api"
+    volumes:
+      - ../config/prometheus:/etc/prometheus:ro
+      - prom-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - obs-net
+    deploy:
+      resources:
+        limits:
+          memory: 1500M
+          cpus: "1.0"
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: obs-grafana
+    hostname: grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=AiSocGrafana2026!
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-clock-panel
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_SERVER_ROOT_URL=http://192.168.100.8:3000
+    volumes:
+      - ../config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+    networks:
+      - obs-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  loki:
+    image: grafana/loki:3.2.1
+    container_name: obs-loki
+    hostname: loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ../config/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+    networks:
+      - obs-net
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+
+  promtail:
+    image: grafana/promtail:3.2.1
+    container_name: obs-promtail
+    hostname: promtail
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ../config/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    depends_on:
+      - loki
+    networks:
+      - obs-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: obs-alertmanager
+    hostname: alertmanager
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    volumes:
+      - ../config/alertmanager:/etc/alertmanager:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - "9093:9093"
+    networks:
+      - obs-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: obs-cadvisor
+    hostname: cadvisor
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "8081:8080"
+    networks:
+      - obs-net
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
+networks:
+  obs-net:
+    driver: bridge
+
+volumes:
+  prom-data: {}
+  grafana-data: {}
+  loki-data: {}
+  alertmanager-data: {}

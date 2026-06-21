@@ -1,0 +1,35 @@
+groups:
+  - name: ai-soc-availability
+    interval: 30s
+    rules:
+      - alert: TargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Scrape target down on {{ $labels.instance }}'
+
+      - alert: HostHighMemory
+        expr: 100 - (windows_os_physical_memory_free_bytes / windows_cs_physical_memory_bytes * 100) > 92
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Memory > 92% on {{ $labels.instance }}'
+
+      - alert: HostHighCpu
+        expr: 100 - (avg by (instance) (rate(windows_cpu_time_total{mode="idle"}[5m])) * 100) > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'CPU > 90% on {{ $labels.instance }}'
+
+      - alert: ContainerOOMRestart
+        expr: changes(container_last_seen[5m]) > 3
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Container {{ $labels.name }} restarted repeatedly'
