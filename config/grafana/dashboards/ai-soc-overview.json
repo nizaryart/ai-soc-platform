@@ -149,6 +149,7 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
+          "displayName": "Log Lines (1h)",
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -174,7 +175,7 @@
         {
           "datasource": { "type": "loki", "uid": "loki" },
           "expr": "sum(count_over_time({host=~\".+\"}[1h]))",
-          "legendFormat": "Log Lines",
+          "legendFormat": "Log Lines (1h)",
           "queryType": "instant",
           "refId": "A"
         }
@@ -343,7 +344,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "100 * (1 - (windows_memory_available_bytes{host=\"M1\"} / windows_cs_physical_memory_bytes{host=\"M1\"}))",
+          "expr": "100 * (1 - (windows_memory_available_bytes{host=\"M1\"} / windows_memory_physical_total_bytes{host=\"M1\"}))",
           "legendFormat": "M1 RAM",
           "refId": "A"
         }
@@ -383,7 +384,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "100 * (1 - (windows_memory_available_bytes{host=\"M2\"} / windows_cs_physical_memory_bytes{host=\"M2\"}))",
+          "expr": "100 * (1 - (windows_memory_available_bytes{host=\"M2\"} / windows_memory_physical_total_bytes{host=\"M2\"}))",
           "legendFormat": "M2 RAM",
           "refId": "A"
         }
@@ -423,7 +424,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "100 * (1 - (windows_memory_available_bytes{host=\"M3\"} / windows_cs_physical_memory_bytes{host=\"M3\"}))",
+          "expr": "100 * (1 - (windows_memory_available_bytes{host=\"M3\"} / windows_memory_physical_total_bytes{host=\"M3\"}))",
           "legendFormat": "M3 RAM",
           "refId": "A"
         }
@@ -523,7 +524,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "100 * (1 - (windows_memory_available_bytes / windows_cs_physical_memory_bytes))",
+          "expr": "100 * (1 - (windows_memory_available_bytes / windows_memory_physical_total_bytes))",
           "legendFormat": "{{host}}",
           "refId": "A"
         }
@@ -627,7 +628,8 @@
       "type": "row"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "description": "Number of distinct container log streams seen by Loki per host in the last 5 minutes. Replaces a Prometheus query — cAdvisor cannot enumerate individual containers on Docker Desktop Windows.",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "continuous-BlPu" },
@@ -653,17 +655,19 @@
       "pluginVersion": "11.3.0",
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "count by (host) (container_last_seen{name!=\"\"})",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "count by (host) (sum by (host, container) (count_over_time({host=~\".+\", container!=\"\"}[5m])))",
           "legendFormat": "{{host}}",
+          "queryType": "instant",
           "refId": "A"
         }
       ],
-      "title": "Container Count per Host",
+      "title": "Active Containers per Host (last 5m)",
       "type": "bargauge"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "description": "Top 10 containers by log volume (lines per second) across the fleet over the last 5 minutes. Useful to spot chatty / runaway services.",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -678,14 +682,14 @@
             "mode": "absolute",
             "steps": [
               { "color": "green", "value": null },
-              { "color": "orange", "value": 25 },
-              { "color": "red", "value": 60 }
+              { "color": "orange", "value": 5 },
+              { "color": "red", "value": 25 }
             ]
           },
-          "unit": "percent"
+          "unit": "short"
         },
         "overrides": [
-          { "matcher": { "id": "byName", "options": "name" }, "properties": [{ "id": "custom.cellOptions", "value": { "type": "auto" } }] },
+          { "matcher": { "id": "byName", "options": "container" }, "properties": [{ "id": "custom.cellOptions", "value": { "type": "auto" } }] },
           { "matcher": { "id": "byName", "options": "host" }, "properties": [{ "id": "custom.cellOptions", "value": { "type": "auto" } }, { "id": "custom.width", "value": 60 }] }
         ]
       },
@@ -700,28 +704,28 @@
       "pluginVersion": "11.3.0",
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "topk(10, sum by (name, host) (rate(container_cpu_usage_seconds_total{name!=\"\"}[2m])) * 100)",
-          "format": "table",
-          "instant": true,
-          "legendFormat": "__auto",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "topk(10, sum by (container, host) (rate({host=~\".+\", container!=\"\"}[5m])))",
+          "queryType": "instant",
+          "legendFormat": "",
           "refId": "A"
         }
       ],
-      "title": "Top 10 Containers by CPU %",
+      "title": "Top 10 Loudest Containers (logs/sec)",
       "transformations": [
         {
           "id": "organize",
           "options": {
-            "excludeByName": { "Time": true, "__name__": true, "job": true, "instance": true, "component": true, "service": true },
-            "indexByName": { "name": 0, "host": 1, "Value": 2 }
+            "excludeByName": { "Time": true, "__name__": true, "job": true, "instance": true, "component": true, "service": true, "service_name": true, "cluster": true, "project": true, "stream": true },
+            "indexByName": { "container": 0, "host": 1, "Value": 2 }
           }
         }
       ],
       "type": "table"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "description": "Top 10 containers by ERROR/WARN/FAIL/EXCEPTION/TIMEOUT/CRITICAL log rate over the last 5 minutes. The 'what's broken right now' panel.",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -736,14 +740,14 @@
             "mode": "absolute",
             "steps": [
               { "color": "green", "value": null },
-              { "color": "orange", "value": 536870912 },
-              { "color": "red", "value": 2147483648 }
+              { "color": "orange", "value": 0.5 },
+              { "color": "red", "value": 5 }
             ]
           },
-          "unit": "decbytes"
+          "unit": "short"
         },
         "overrides": [
-          { "matcher": { "id": "byName", "options": "name" }, "properties": [{ "id": "custom.cellOptions", "value": { "type": "auto" } }] },
+          { "matcher": { "id": "byName", "options": "container" }, "properties": [{ "id": "custom.cellOptions", "value": { "type": "auto" } }] },
           { "matcher": { "id": "byName", "options": "host" }, "properties": [{ "id": "custom.cellOptions", "value": { "type": "auto" } }, { "id": "custom.width", "value": 60 }] }
         ]
       },
@@ -758,21 +762,20 @@
       "pluginVersion": "11.3.0",
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "topk(10, sum by (name, host) (container_memory_usage_bytes{name!=\"\"}))",
-          "format": "table",
-          "instant": true,
-          "legendFormat": "__auto",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "topk(10, sum by (container, host) (rate({host=~\".+\", container!=\"\"} |~ \"(?i)(error|warn|fail|exception|timeout|critical)\"[5m])))",
+          "queryType": "instant",
+          "legendFormat": "",
           "refId": "A"
         }
       ],
-      "title": "Top 10 Containers by Memory",
+      "title": "Top 10 Noisiest Containers (errors+warns/sec)",
       "transformations": [
         {
           "id": "organize",
           "options": {
-            "excludeByName": { "Time": true, "__name__": true, "job": true, "instance": true, "component": true, "service": true },
-            "indexByName": { "name": 0, "host": 1, "Value": 2 }
+            "excludeByName": { "Time": true, "__name__": true, "job": true, "instance": true, "component": true, "service": true, "service_name": true, "cluster": true, "project": true, "stream": true },
+            "indexByName": { "container": 0, "host": 1, "Value": 2 }
           }
         }
       ],
