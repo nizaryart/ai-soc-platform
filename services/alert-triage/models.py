@@ -70,7 +70,9 @@ class SecurityAlert(BaseModel):
     user: Optional[str] = None
     process: Optional[str] = None
     command: Optional[str] = None
+    command_decoded: Optional[str] = None      # base64-decoded PS payload
     file_path: Optional[str] = None
+    sysmon_context: Optional[Dict[str, Any]] = None
 
     # Raw Data
     raw_log: Optional[str] = Field(None, description="Original log message")

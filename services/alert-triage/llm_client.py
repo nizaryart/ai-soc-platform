@@ -154,6 +154,11 @@ class OllamaClient:
                 f"`mitre_techniques` output unless the alert clearly does not match.\n\n---\n"
             )
 
+        sysmon_block = ""
+        if alert.sysmon_context:
+            lines = [f"  - {k}: {v}" for k, v in alert.sysmon_context.items()]
+            sysmon_block = "\n- **Sysmon parent / file context:**\n" + "\n".join(lines)
+
         prompt = f"""You are an expert cybersecurity analyst performing alert triage for a Security Operations Center (SOC).
 
 **TASK:** Analyze the following security alert and provide a structured assessment.
@@ -167,7 +172,8 @@ class OllamaClient:
 - User: {alert.user or 'N/A'}
 - Process: {alert.process or 'N/A'}
 - **Command line:** {alert.command or 'N/A'}
-- **File path:** {alert.file_path or 'N/A'}
+- **Decoded command (if -enc / -EncodedCommand was used):** {alert.command_decoded or 'N/A'}
+- **File path:** {alert.file_path or 'N/A'}{sysmon_block}
 - Raw Log: {(alert.raw_log or 'N/A')[:600]}
 
 **YOUR ANALYSIS MUST INCLUDE:**
@@ -185,31 +191,92 @@ class OllamaClient:
 - Provide confidence score (0.0-1.0) for your assessment
 - Be concise but thorough
 
-**OUTPUT FORMAT (JSON):**
+**COMMAND-LINE INTERPRETATION GUIDE (apply when the indicator is present):**
+- `-nop` / `-NoProfile` — skips loading PowerShell profile. Common in both admin scripts and malware;
+ weak on its own, suspicious when combined with the others.
+- `-w hidden` / `-WindowStyle Hidden` — hides the PowerShell console window from the interactive
+user. Strong stealth indicator. Maps to MITRE T1564.003 (Hidden Window).
+- `-enc` / `-EncodedCommand` — payload is base64(UTF-16LE)-encoded. MITRE T1027 (Obfuscated Files or
+Information). When the **Decoded command** is provided above, ground your assessment in the DECODED
+contents — the encoding itself is the stealth indicator, the decoded text is what the attacker is
+actually running.
+- `IEX` / `Invoke-Expression` combined with `DownloadString` / `DownloadFile` / `WebClient` /
+`Net.WebRequest` — classic download-and-execute cradle. MITRE T1059.001 + T1105.
+- `FromBase64String` — inline base64 decoding in the script body, similar T1027 implication.
+- Parent process `winword.exe` / `excel.exe` / `powerpnt.exe` / `outlook.exe` spawning `cmd.exe` /
+`powershell.exe` — Office macro execution. MITRE T1566.001 + T1059.
+
+**GROUNDING REQUIREMENT:** when one or more of the indicators above is present in **Command line** or
+ **Decoded command**, your `summary` and at least one of your `recommendations.rationale` fields MUST
+ explicitly name that indicator (e.g. "-w hidden", "base64-encoded payload `echo Test`", "Office
+macro chain"). Generic phrasing like "potential malicious activity" without naming an indicator
+counts as a wrong answer.
+
+**OUTPUT FORMAT — JSON only. No markdown, no prose outside the JSON.**
+
+The JSON schema is:
+- "severity": "critical" | "high" | "medium" | "low" | "informational"
+- "category": "malware" | "intrusion_attempt" | "data_exfiltration" | "privilege_escalation" | "lateral_movement" | "command_and_control" | "reconnaissance" | "policy_violation" | "other"
+- "confidence": float 0.0-1.0
+- "summary": single sentence summarising THIS specific alert. MUST quote concrete details from ALERT DETAILS above (command line, process, file path, IPs, user, or hashes). Generic phrasing like "potential malicious activity" is forbidden.
+- "detailed_analysis": 2-4 sentences citing evidence taken FROM THIS ALERT.
+- "potential_impact": 1 sentence on business/security impact.
+- "is_true_positive": boolean
+- "false_positive_reason": string or null
+- "iocs": [ {{"ioc_type": "ip|domain|hash|file|url|email", "value": "...", "confidence": 0.0-1.0}} ]
+- "mitre_techniques": [MITRE technique IDs — prefer the SUGGESTED TECHNIQUES above when relevant]
+- "mitre_tactics": [MITRE tactic IDs, e.g. "TA0002"]
+- "recommendations": [ {{"action": "...", "priority": 1-5, "rationale": "..."}} ] — each rationale MUST reference specific evidence from THIS alert, never generic guidance.
+- "investigation_priority": int 1-5
+- "estimated_analyst_time": int minutes
+
+**EXAMPLES (FORMAT REFERENCE ONLY — DO NOT COPY THESE VALUES INTO YOUR ANSWER. These are unrelated alerts shown only to illustrate the JSON shape):**
+
+Example 1 — a brute force SSH alert (DIFFERENT alert, do not reuse):
 {{
     "severity": "high",
     "category": "intrusion_attempt",
-    "confidence": 0.92,
-    "summary": "Brief 1-sentence summary",
-    "detailed_analysis": "Technical analysis with evidence",
-    "potential_impact": "Business/security impact",
+    "confidence": 0.88,
+    "summary": "Repeated failed SSH logins from 203.0.113.42 against user root within 60s — consistent with credential brute force.",
+    "detailed_analysis": "Source IP 203.0.113.42 attempted 47 SSH logins as user 'root' in 58 seconds. Pattern matches automated credential stuffing.",
+    "potential_impact": "If credentials are weak, attacker gains shell access to the SSH host.",
     "is_true_positive": true,
     "false_positive_reason": null,
-    "iocs": [
-        {{"ioc_type": "ip", "value": "203.0.113.42", "confidence": 0.95}}
-    ],
+    "iocs": [{{"ioc_type": "ip", "value": "203.0.113.42", "confidence": 0.95}}],
     "mitre_techniques": ["T1110.001"],
     "mitre_tactics": ["TA0006"],
     "recommendations": [
-        {{
-            "action": "Block source IP at firewall",
-            "priority": 1,
-            "rationale": "Prevent continued brute force attempts"
-        }}
+        {{"action": "Block 203.0.113.42 at edge firewall", "priority": 1, "rationale": "Source IP produced 47 failed root logins in 58s — confirmed hostile."}}
     ],
     "investigation_priority": 2,
     "estimated_analyst_time": 15
 }}
+
+Example 2 — a malicious document executing macros (DIFFERENT alert, do not reuse):
+{{
+    "severity": "critical",
+    "category": "malware",
+    "confidence": 0.93,
+    "summary": "winword.exe spawned cmd.exe which launched powershell.exe downloading payload.exe from 198.51.100.7 — classic phishing payload chain.",
+    "detailed_analysis": "Parent process chain winword.exe -> cmd.exe -> powershell.exe with DownloadFile against 198.51.100.7/payload.exe matches T1566.001 macro execution leading to T1105 ingress tool transfer.",
+    "potential_impact": "Initial foothold via Office macro; payload may persist via scheduled task or registry run key.",
+    "is_true_positive": true,
+    "false_positive_reason": null,
+    "iocs": [
+        {{"ioc_type": "ip", "value": "198.51.100.7", "confidence": 0.9}},
+        {{"ioc_type": "url", "value": "http://198.51.100.7/payload.exe", "confidence": 0.9}}
+    ],
+    "mitre_techniques": ["T1566.001", "T1059.001", "T1105"],
+    "mitre_tactics": ["TA0001", "TA0002"],
+    "recommendations": [
+        {{"action": "Isolate the workstation that ran winword.exe", "priority": 1, "rationale": "Office spawned a downloader chain — host is compromised until verified."}},
+        {{"action": "Hunt for payload.exe on disk and in execution history", "priority": 2, "rationale": "URL 198.51.100.7/payload.exe in the command line confirms a dropped binary."}}
+    ],
+    "investigation_priority": 1,
+    "estimated_analyst_time": 30
+}}
+
+**REMEMBER:** the two examples above are for SHAPE only. Your JSON must describe the CURRENT alert in ALERT DETAILS, using evidence from THAT alert. If you copy any of the IPs, recommendations, or summaries above verbatim, your answer is WRONG.
 
 Begin your analysis now:"""
 

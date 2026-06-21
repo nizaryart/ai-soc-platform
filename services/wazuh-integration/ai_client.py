@@ -5,6 +5,9 @@ AI-Augmented SOC
 Handles communication with Alert Triage and RAG services.
 """
 
+import base64
+import re
+
 import httpx
 import structlog
 from typing import Dict, Any, Optional
@@ -30,6 +33,28 @@ class AIClient:
             rag_url=self.rag_url,
             correlation_url=self.correlation_url,
         )
+
+    @staticmethod
+    def _decode_powershell_enc(command: Optional[str]) -> Optional[str]:
+        """If command uses -enc / -EncodedCommand, return the decoded plaintext.
+
+        PowerShell's -EncodedCommand expects base64 of UTF-16LE.
+        Returns None when no -enc flag is present or decoding fails.
+        """
+        if not command:
+            return None
+        m = re.search(
+            r"-(?:e|enc|encodedcommand)\s+([A-Za-z0-9+/=]+)",
+            command,
+            re.IGNORECASE,
+        )
+        if not m:
+            return None
+        try:
+            raw = base64.b64decode(m.group(1), validate=True)
+            return raw.decode("utf-16-le", errors="replace").strip()
+        except Exception:
+            return None
 
     def transform_wazuh_to_triage_format(self, wazuh_alert: WazuhAlert) -> Dict[str, Any]:
         """
@@ -97,6 +122,9 @@ class AIClient:
                 # Process / command (Sysmon Event 1 — ProcessCreate)
                 if ed.get("commandLine"):
                     triage_payload["command"] = ed.get("commandLine")
+                    decoded = self._decode_powershell_enc(ed.get("commandLine"))
+                    if decoded:
+                        triage_payload["command_decoded"] = decoded
                 if ed.get("image"):
                     triage_payload["process"] = ed.get("image")
                 # File path (Sysmon Event 11 — FileCreate / Event 23 — FileDelete)

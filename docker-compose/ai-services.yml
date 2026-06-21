@@ -58,6 +58,8 @@ services:
     environment:
       - TRIAGE_OLLAMA_HOST=http://host.docker.internal:11434
       - TRIAGE_PRIMARY_MODEL=${OLLAMA_MODEL:-llama3.1:8b-instruct-q4_K_M}
+      - TRIAGE_FALLBACK_MODEL=${TRIAGE_FALLBACK_MODEL:-llama3.2:3b}
+      - TRIAGE_MAX_TOKENS=${TRIAGE_MAX_TOKENS:-900}
       - TRIAGE_ML_API_URL=http://ml-inference:8000
       - TRIAGE_RAG_SERVICE_URL=http://rag-service:8000
       # Generous timeout (1000s) — but only safe when alert-triage serializes
@@ -114,7 +116,7 @@ services:
     hostname: wazuh-integration
     restart: unless-stopped
     ports:
-      - "8002:8002"
+      - "0.0.0.0:8002:8002"
     environment:
       - WAZUH_MANAGER_URL=${WAZUH_URL}
       - WAZUH_USERNAME=${WAZUH_USERNAME:-wazuh-wui}
