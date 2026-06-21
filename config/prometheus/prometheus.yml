@@ -39,7 +39,8 @@ scrape_configs:
           service: 'prometheus'
 
   # ============================================================================
-  # Node Exporter (Host Metrics)
+  # Node Exporter (Linux hosts only — none deployed in this project, kept for
+  # reference. All three machines are Windows; see windows-exporter jobs below.)
   # ============================================================================
   - job_name: 'node-exporter'
     static_configs:
@@ -47,6 +48,34 @@ scrape_configs:
         labels:
           component: 'infrastructure'
           service: 'host'
+
+  # ============================================================================
+  # windows_exporter — host CPU / RAM / disk / network on each Windows machine
+  # Each machine runs windows_exporter natively on port 9182 (LAN-reachable).
+  # ============================================================================
+  - job_name: 'windows-exporter-m1'
+    static_configs:
+      - targets: ['192.168.100.124:9182']
+        labels:
+          component: 'infrastructure'
+          service: 'host'
+          host: 'M1'
+
+  - job_name: 'windows-exporter-m2'
+    static_configs:
+      - targets: ['192.168.100.152:9182']
+        labels:
+          component: 'infrastructure'
+          service: 'host'
+          host: 'M2'
+
+  - job_name: 'windows-exporter-m3'
+    static_configs:
+      - targets: ['192.168.100.8:9182']
+        labels:
+          component: 'infrastructure'
+          service: 'host'
+          host: 'M3'
 
   # ============================================================================
   # cAdvisor (Container Metrics)
