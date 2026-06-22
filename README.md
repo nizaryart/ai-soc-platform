@@ -21,7 +21,7 @@ Three machines. One brain. Real telemetry, real detections, real cases.
 
 | Wazuh detects | AI analyzes | TheHive case lands |
 |---|---|---|
-| ![Wazuh detection](docs/screenshots/wazuh-alert.png) | ![AI summary](docs/screenshots/ai-summary.png) | ![TheHive case](docs/screenshots/thehive-case.png) |
+| ![Wazuh detection](docs/screenshots/wazuh_threat_hunting_page.jpeg) | ![AI summary](docs/screenshots/ai-summary.jpeg) | ![TheHive case](docs/screenshots/thehive-case-detail.jpeg) |
 | Sysmon Event 1 — encoded PowerShell flagged by custom rule `101002` | Triage service decodes the base64 payload, names every stealth flag, maps to MITRE T1564.003 | Case created in <2 sec with full AI analysis, prioritized recommendations, and observables attached |
 
 ---
@@ -92,6 +92,8 @@ Most "AI + SIEM" projects pipe raw alert text to a chat model and hope for the b
 
 ## Custom detection rules
 
+![Wazuh SIEM Dashboard](docs/screenshots/wazuh_dashboard.jpeg)
+
 The repo ships with eight high-fidelity Sysmon-based detection rules plus five tuned noise-suppression rules. Every detection rule chains off a Sysmon event so the resulting alert carries the full command line, parent process, and hashes that the AI pipeline needs.
 
 | Rule | Severity | Detects | MITRE |
@@ -111,7 +113,7 @@ The repo ships with eight high-fidelity Sysmon-based detection rules plus five t
 
 ## Observability
 
-![SOC Overview Dashboard](docs/screenshots/grafana-dashboard.png)
+![SOC Overview Dashboard](docs/screenshots/grafana-dashboard.jpeg)
 
 A single Grafana dashboard surfaces the entire fleet: per-host CPU/RAM/disk, live log volume per machine, scrape target health, and active Prometheus alerts. Built on:
 
@@ -126,7 +128,7 @@ The dashboard tolerates clock skew between machines (Loki `creation_grace_period
 
 ## SOAR layer
 
-![TheHive case detail](docs/screenshots/thehive-case-detail.png)
+![TheHive cases page](docs/screenshots/thehive_cases_page.jpeg)
 
 Every AI-triaged alert lands in TheHive as a structured case:
 
@@ -137,9 +139,12 @@ Every AI-triaged alert lands in TheHive as a structured case:
 - **Tasks** generated from each LLM recommendation (titles auto-truncated to TheHive's 128-char limit; full text preserved in task description)
 - **Observables** for IPs, users, processes, hashes
 
-Case creation triggers a Shuffle workflow that enriches IOCs with **AbuseIPDB**, **VirusTotal v3**, and **AlienVault OTX**, writes back a computed risk score as a TheHive custom field, and — if risk crosses threshold — triggers a second workflow for automated response and Discord notification.
+Case creation triggers an IOC-enrichment workflow in Shuffle that hits **AbuseIPDB**, **VirusTotal v3**, and **AlienVault OTX**, writes back a computed risk score as a TheHive custom field, and — if risk crosses threshold — fires a second workflow for automated response and Discord notification.
 
-![Shuffle workflow](docs/screenshots/shuffle-workflow.png)
+| Workflow 1 — IOC Enrichment | Workflow 2 — Automated Response |
+|---|---|
+| ![Shuffle Workflow 1](docs/screenshots/shuffle_ioc_workflow_1.jpeg) | ![Shuffle Workflow 2](docs/screenshots/shuffle_workflow_2.jpeg) |
+| Reads TheHive observables → queries threat-intel APIs → computes aggregated risk score → patches the case + adds enrichment comment | Triggered by W1 when risk ≥ threshold → executes response actions (host isolation, IP block) and pings on-call via Discord |
 
 ---
 
